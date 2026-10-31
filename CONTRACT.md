@@ -59,6 +59,7 @@ Path states of the shared-LUN datastores of one HVM cluster, per datastore and h
           "state": "ok",
           "activePaths": 2,
           "totalPaths": 2,
+          "expectedPaths": 2,
           "measuredAt": "2026-10-31T15:19:23.236Z",
           "error": null
         }
@@ -82,19 +83,24 @@ Path states of the shared-LUN datastores of one HVM cluster, per datastore and h
 | `hosts[].hostId` | number | Morpheus server id of the host |
 | `hosts[].name` | string \| null | host name, `null` without Compute permission |
 | `hosts[].state` | string | state of the LUN on this host, see below |
-| `hosts[].activePaths`, `.totalPaths` | number \| null | active and configured paths of the LUN on this host; `0`/`0` if the host does not see the LUN; `null` if the state is `unknown` |
+| `hosts[].activePaths`, `.totalPaths` | number \| null | active and known paths of the LUN on this host; `0`/`0` if the host does not see the LUN; `null` if the state is `unknown` |
+| `hosts[].expectedPaths` | number \| null | highest `totalPaths` of this LUN on any measured host of the cluster (since 0.2.0); `null` if the state is `unknown` |
 | `hosts[].measuredAt` | string \| null | time the host was last queried (ISO-8601, UTC); `null` if not queried yet |
 | `hosts[].error` | string \| null | why the measurement failed (short English text, no command output); `null` on success |
 
 ### States
 | `state` | Meaning |
 |---|---|
-| `ok` | all paths of the LUN active |
-| `degraded` | some, but not all paths active |
+| `ok` | all paths of the LUN active, and the host has as many paths as `expectedPaths` |
+| `degraded` | some, but not all paths active – or all active, but fewer than `expectedPaths` (a path was removed on this host, e.g. iSCSI session logged out: multipath then forgets it and counts 1/1) |
 | `down` | no path active, or the host does not see the LUN at all |
 | `unknown` | not measured yet, or the last measurement of the host failed (see `error`) |
 
 Severity for combining hosts and datastores: `down` > `degraded` > `unknown` > `ok`.
+
+The comparison with `expectedPaths` assumes that all hosts of a cluster are connected to the storage alike. If one
+host has fewer paths by design, it is permanently reported as `degraded`. A host that is switched off or cannot be
+reached is `unknown` (not `down`): its paths cannot be measured.
 
 Possible `error` texts (consumers should display, not parse them): `no answer within <n> s`,
 `command failed with exit code <n>`, `command failed on the host`, `command could not be run on the host`,

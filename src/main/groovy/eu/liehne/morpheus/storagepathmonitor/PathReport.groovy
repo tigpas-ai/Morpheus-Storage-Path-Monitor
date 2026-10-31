@@ -40,6 +40,7 @@ class PathReport {
 													  Map<Long, HostMeasurement> measurements, boolean withHostNames) {
 		Map<String, Integer> counts = PathState.values().collectEntries { [(it.code): 0] } as Map<String, Integer>
 		List<PathState> states = []
+		int expected = expectedPaths(ds, hosts, measurements)
 		List<Map<String, Object>> hostEntries = hosts.collect { HostRef host ->
 			HostMeasurement m = measurements.get(host.id)
 			PathState state
@@ -49,7 +50,7 @@ class PathReport {
 				state = PathState.UNKNOWN
 			} else {
 				MultipathStatus.Device device = m.devices.get(ds.device)
-				state = PathState.of(device)
+				state = stateOf(device, expected)
 				active = device?.active ?: 0
 				total = device?.paths ?: 0
 			}
@@ -59,8 +60,9 @@ class PathReport {
 				hostId     : host.id,
 				name       : withHostNames ? host.name : null,
 				state      : state.code,
-				activePaths: active,
-				totalPaths : total,
+				activePaths  : active,
+				totalPaths   : total,
+				expectedPaths: m?.success ? expected : null,
 				measuredAt : iso(m?.measuredAt),
 				error      : m?.error
 			] as Map<String, Object>
@@ -72,6 +74,29 @@ class PathReport {
 			counts: counts,
 			hosts : hostEntries
 		] as Map<String, Object>
+	}
+
+	/**
+	 * Paths a host should have for this LUN: the highest path count any measured host of the cluster reports. When
+	 * a path is removed on one host (e.g. iSCSI session logged out), multipath forgets it and reports 1/1, which only
+	 * this comparison reveals. Assumes all hosts of a cluster are cabled alike.
+	 */
+	static int expectedPaths(SharedDatastore ds, List<HostRef> hosts, Map<Long, HostMeasurement> measurements) {
+		int expected = 0
+		hosts.each { HostRef host ->
+			HostMeasurement m = measurements.get(host.id)
+			MultipathStatus.Device device = m?.success ? m.devices.get(ds.device) : null
+			if (device != null && device.paths > expected) {
+				expected = device.paths
+			}
+		}
+		return expected
+	}
+
+	/** State of the LUN on a host: {@link PathState#of}, and degraded if it has fewer paths than expected */
+	static PathState stateOf(MultipathStatus.Device device, int expected) {
+		PathState state = PathState.of(device)
+		return state == PathState.OK && device.paths < expected ? PathState.DEGRADED : state
 	}
 
 	private static String iso(Instant instant) {

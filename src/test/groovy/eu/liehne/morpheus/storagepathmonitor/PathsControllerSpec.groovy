@@ -62,15 +62,46 @@ class PathsControllerSpec extends Specification {
 			intervalSeconds: 60,
 			datastores     : [
 				[id: 21L, name: 'ds-1', state: 'unknown', counts: [ok: 2, unknown: 1, degraded: 0, down: 0], hosts: [
-					[hostId: 11L, name: 'host-a', state: 'ok', activePaths: 2, totalPaths: 2, measuredAt: '2026-01-01T10:00:00Z', error: null],
-					[hostId: 12L, name: 'host-b', state: 'ok', activePaths: 2, totalPaths: 2, measuredAt: '2026-01-01T10:00:05Z', error: null],
-					[hostId: 13L, name: 'host-c', state: 'unknown', activePaths: null, totalPaths: null, measuredAt: '2026-01-01T10:00:05Z', error: 'no answer within 30 s']]],
+					[hostId: 11L, name: 'host-a', state: 'ok', activePaths: 2, totalPaths: 2, expectedPaths: 2, measuredAt: '2026-01-01T10:00:00Z', error: null],
+					[hostId: 12L, name: 'host-b', state: 'ok', activePaths: 2, totalPaths: 2, expectedPaths: 2, measuredAt: '2026-01-01T10:00:05Z', error: null],
+					[hostId: 13L, name: 'host-c', state: 'unknown', activePaths: null, totalPaths: null, expectedPaths: null, measuredAt: '2026-01-01T10:00:05Z', error: 'no answer within 30 s']]],
 				[id: 22L, name: 'ds-2', state: 'down', counts: [ok: 0, unknown: 1, degraded: 1, down: 1], hosts: [
-					[hostId: 11L, name: 'host-a', state: 'degraded', activePaths: 1, totalPaths: 2, measuredAt: '2026-01-01T10:00:00Z', error: null],
-					[hostId: 12L, name: 'host-b', state: 'down', activePaths: 0, totalPaths: 0, measuredAt: '2026-01-01T10:00:05Z', error: null],
-					[hostId: 13L, name: 'host-c', state: 'unknown', activePaths: null, totalPaths: null, measuredAt: '2026-01-01T10:00:05Z', error: 'no answer within 30 s']]]
+					[hostId: 11L, name: 'host-a', state: 'degraded', activePaths: 1, totalPaths: 2, expectedPaths: 2, measuredAt: '2026-01-01T10:00:00Z', error: null],
+					[hostId: 12L, name: 'host-b', state: 'down', activePaths: 0, totalPaths: 0, expectedPaths: 2, measuredAt: '2026-01-01T10:00:05Z', error: null],
+					[hostId: 13L, name: 'host-c', state: 'unknown', activePaths: null, totalPaths: null, expectedPaths: null, measuredAt: '2026-01-01T10:00:05Z', error: 'no answer within 30 s']]]
 			]
 		]
+	}
+
+	def 'a host with fewer paths than its peers is degraded even if all its paths are active'() {
+		given:
+		snapshot = new Snapshot([(7L): [new HostRef(11L, 'a'), new HostRef(12L, 'b'), new HostRef(13L, 'c')]],
+			[(11L): HostMeasurement.success(11L, T1, [lun1: new MultipathStatus.Device(2, 2)]),
+			 (12L): HostMeasurement.success(12L, T1, [lun1: new MultipathStatus.Device(1, 1)]),
+			 (13L): HostMeasurement.success(13L, T1, [lun1: new MultipathStatus.Device(2, 2)])], T1)
+		directory.clusterVisible(admin, 7L) >> true
+		directory.datastores(admin, 7L) >> [new SharedDatastore(21L, 'ds-1', 'lun1')]
+
+		when:
+		Map ds = (controller.paths(model(admin, [clusterId: '7'])).data as Map).datastores[0] as Map
+
+		then:
+		ds.state == 'degraded'
+		ds.counts == [ok: 2, unknown: 0, degraded: 1, down: 0]
+		ds.hosts*.state == ['ok', 'degraded', 'ok']
+		ds.hosts*.expectedPaths == [2, 2, 2]
+		ds.hosts[1].activePaths == 1
+		ds.hosts[1].totalPaths == 1
+	}
+
+	def 'peer comparison: single host and unknown hosts'() {
+		expect:
+		PathReport.stateOf(new MultipathStatus.Device(1, 1), 1) == PathState.OK
+		PathReport.stateOf(new MultipathStatus.Device(1, 1), 2) == PathState.DEGRADED
+		PathReport.stateOf(new MultipathStatus.Device(2, 0), 2) == PathState.DOWN
+		PathReport.stateOf(null, 2) == PathState.DOWN
+		PathReport.expectedPaths(new SharedDatastore(1L, 'x', 'lun1'), [new HostRef(13L, 'c')],
+			[(13L): HostMeasurement.failure(13L, T1, 'x')]) == 0
 	}
 
 	def 'hosts=false returns counters only'() {

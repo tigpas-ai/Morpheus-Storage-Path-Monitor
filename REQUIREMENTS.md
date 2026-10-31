@@ -27,6 +27,7 @@ the first path of each LUN, although a host typically has several.
 | Scheduling | own `ScheduledExecutorService` (one daemon thread) plus a fixed pool per run with `parallelHosts` threads; next run `intervalSeconds` after the end of the previous one | Runs never overlap; settings take effect on the next run; `onDestroy` → `shutdownNow` of both |
 | Data per request | snapshot in memory (hosts per cluster + last measurement per host); datastores are read per request with the user | No host calls per request; datastore visibility follows the user's permissions |
 | Datastore ↔ LUN | `config.blockDevice = /dev/mapper/<name>`; `<name>` is matched against `device` of the command output | Datastore type `libvirt-dir-gfs2` stores the multipath device there (verified). Other datastores are ignored |
+| Expected paths | highest path count of the LUN on any measured host of the cluster (`expectedPaths`); fewer → `degraded` | multipath forgets removed paths (test B); assumes alike cabling of all hosts |
 | Expected hosts | all hosts of the cluster (servers with `serverGroup` = cluster, no parent) | A shared LUN must be present on every host; a host without it is `down`. The datastore `locations[]` are not used: they are empty while a datastore is provisioning |
 | Failed measurement | state `unknown` with `error`, counters `null` | Old counters would look current |
 | Error texts | fixed English texts, never command output | Output may contain host details |
@@ -53,9 +54,21 @@ the first path of each LUN, although a host typically has several.
 - Permissions (verified with test users): `infrastructure-storage` read + `infrastructure-cluster` read without
   `admin-servers` → `200` without host names; without `infrastructure-storage` → `403`.
 
+## Path failure tests (test appliance, one host of three, two iSCSI portals, one target, 10 LUNs)
+| Test | What happened on the host | Plugin (interval 15 s) |
+|---|---|---|
+| A: iSCSI traffic to portal 2 dropped (firewall) | multipath: 1/2 active per LUN after about 15 s | `degraded` 1/2 after about 30 s; `ok` 2/2 again 15 s after the rule was removed |
+| B: iSCSI session to portal 2 logged out | the paths disappear: multipath reports **1/1** (`paths` 1) | 0.1.0: `ok` 1/1 (wrong). → 0.2.0 compares with the other hosts (`expectedPaths`) and reports `degraded`. After login 2/2 within 30 s |
+| C: traffic to both portals dropped | after a few seconds GFS2 withdraws the file system (`Error -5 writing to journal`), followed by a kernel BUG in the GFS2 glock code → kernel panic, kdump, reboot (twice, about 2 min) | host unreachable → `unknown` with `no answer within 30 s`; `ok` again after the reboot once multipath and the mounts are back |
+
+Conclusions:
+- With all paths lost and no I/O queueing (`features='0'`), a host with mounted GFS2 datastores does not stay up long
+  enough to be seen as `down` from the manager; it is reported as `unknown`. `down` remains relevant for a single LUN
+  that is lost (unmapped, missing on one host) while the host keeps running.
+- The other hosts keep running; the failed host leaves the DLM lockspaces and rejoins after the reboot.
+
 ## Open points
-1. `degraded`/`down` with a really disconnected path (requirement 5) – waiting for approval.
-2. Users of a sub-tenant: the tenant check is unit-tested; a test with a real sub-tenant user is still open
+1. Users of a sub-tenant: the tenant check is unit-tested; a test with a real sub-tenant user is still open
    (the test appliance has only the master tenant).
-3. Group access of roles: whether `DataQuery(user)` filters clusters by the role's group access is not established
+2. Group access of roles: whether `DataQuery(user)` filters clusters by the role's group access is not established
    (same open point as in other plugins using the same services).
