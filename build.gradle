@@ -1,0 +1,91 @@
+buildscript {
+    repositories {
+        mavenLocal()
+        mavenCentral()
+        maven { url "https://plugins.gradle.org/m2/" }
+    }
+    dependencies {
+        classpath "com.github.johnrengelman:shadow:8.1.1"
+        classpath "com.morpheusdata:morpheus-plugin-gradle:1.3.1"
+        classpath "com.bertramlabs.plugins:asset-pipeline-gradle:$assetPipelineVersion"
+    }
+}
+
+apply plugin: 'java'
+apply plugin: 'groovy'
+apply plugin: 'idea'
+apply plugin: 'com.github.johnrengelman.shadow'
+apply plugin: 'asset-pipeline'
+apply plugin: 'com.morpheusdata.morpheus-plugin-gradle'
+
+group = 'eu.liehne.morpheus.storagepathmonitor'
+ext.isReleaseVersion = !version.endsWith("SNAPSHOT")
+
+java {
+    sourceCompatibility = JavaVersion.toVersion('1.11')
+    targetCompatibility = JavaVersion.toVersion('1.11')
+}
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+configurations {
+    provided
+}
+
+dependencies {
+    provided "com.morpheusdata:morpheus-plugin-api:$morpheusApiVersion"
+    provided "org.codehaus.groovy:groovy-all:$groovyVersion"
+    implementation "org.slf4j:slf4j-api:$slf4jVersion"
+
+    testImplementation 'io.reactivex.rxjava3:rxjava:3.1.7'
+    testImplementation "org.slf4j:slf4j-parent:$slf4jVersion"
+    testImplementation "org.codehaus.groovy:groovy-all:$groovyVersion"
+    testImplementation 'net.bytebuddy:byte-buddy:1.9.3'
+    testImplementation 'org.objenesis:objenesis:2.6'
+    testImplementation platform("org.spockframework:spock-bom:$spockVersion")
+    testImplementation "org.spockframework:spock-core"
+    testImplementation 'cglib:cglib-nodep:3.2.12'
+}
+
+sourceSets {
+    main {
+        compileClasspath += configurations.provided
+    }
+    test {
+        compileClasspath += configurations.provided
+        runtimeClasspath += configurations.provided
+    }
+}
+
+// Plugin metadata written into the jar
+jar {
+    manifest {
+        attributes(
+                'Plugin-Class': 'eu.liehne.morpheus.storagepathmonitor.StoragePathMonitorPlugin',
+                'Plugin-Version': version,
+                'Morpheus-Name': 'Storage Path Monitor',
+                'Morpheus-Organization': 'morpheus',
+                'Morpheus-Code': 'storage-path-monitor',
+                'Morpheus-Description': 'Monitors the multipath storage paths of shared-LUN datastores on HVM hosts',
+                'Morpheus-Logo': 'assets/morpheus.svg',
+                'Morpheus-Logo-Dark': 'assets/morpheus.svg',
+                'Morpheus-Labels': 'Plugin',
+                'Morpheus-Min-Appliance-Version': "9.1.0"
+        )
+    }
+}
+
+assets {
+    packagePlugin = false // leave this false for plugins
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        exceptionFormat = 'full'
+    }
+}
+tasks.assemble.dependsOn tasks.shadowJar

@@ -1,0 +1,200 @@
+package eu.liehne.morpheus.storagepathmonitor
+
+import com.morpheusdata.core.MorpheusContext
+import com.morpheusdata.model.Account
+import com.morpheusdata.model.User
+import com.morpheusdata.views.JsonResponse
+import com.morpheusdata.views.ViewModel
+import jakarta.servlet.http.HttpServletRequest
+import jakarta.servlet.http.HttpServletResponse
+import spock.lang.Shared
+import spock.lang.Specification
+import spock.lang.Unroll
+
+import java.time.Instant
+import java.util.function.Supplier
+
+class PathsControllerSpec extends Specification {
+
+	static final Instant T1 = Instant.parse('2026-01-01T10:00:00Z')
+	static final Instant T2 = Instant.parse('2026-01-01T10:00:05Z')
+
+	@Shared Account master = new Account(id: 1L, masterAccount: true)
+	@Shared User admin = new User(id: 1L, account: master, permissions: ['infrastructure-cluster': 'full',
+		'infrastructure-storage': 'full', 'admin-servers': 'full'])
+	@Shared User storageOnly = new User(id: 2L, account: master, permissions: ['infrastructure-cluster': 'read',
+		'infrastructure-storage': 'read'])
+	@Shared User noStorage = new User(id: 3L, account: master, permissions: ['infrastructure-cluster': 'full',
+		'infrastructure-storage': 'none', 'admin-servers': 'full'])
+	@Shared User noCluster = new User(id: 4L, account: master, permissions: ['infrastructure-storage': 'read'])
+
+	UserDirectory directory = Mock()
+	Snapshot snapshot = new Snapshot(
+		[(7L): [new HostRef(11L, 'host-a'), new HostRef(12L, 'host-b'), new HostRef(13L, 'host-c')]],
+		[(11L): HostMeasurement.success(11L, T1, ['lun1': new MultipathStatus.Device(2, 2), 'lun2': new MultipathStatus.Device(2, 1)]),
+		 (12L): HostMeasurement.success(12L, T2, ['lun1': new MultipathStatus.Device(2, 2)]),
+		 (13L): HostMeasurement.failure(13L, T2, 'no answer within 30 s')],
+		T1)
+	PathsController controller = new PathsController(null, Stub(MorpheusContext), directory,
+		{ snapshot } as Supplier<Snapshot>, { MonitorSettings.DEFAULTS } as Supplier<MonitorSettings>)
+
+	def 'registers one read route with the storage permission'() {
+		expect:
+		controller.routes*.url == ['/storage-path-monitor/paths']
+		controller.routes*.method == ['paths']
+		controller.routes.every { it.permissions*.code == ['infrastructure-storage'] }
+	}
+
+	def 'returns counters and states per datastore and host'() {
+		given:
+		directory.clusterVisible(admin, 7L) >> true
+		directory.datastores(admin, 7L) >> [new SharedDatastore(21L, 'ds-1', 'lun1'), new SharedDatastore(22L, 'ds-2', 'lun2')]
+
+		when:
+		JsonResponse response = controller.paths(model(admin, [clusterId: '7']))
+
+		then:
+		response.status == 200
+		response.data == [
+			clusterId      : 7L,
+			state          : 'down',
+			lastRunAt      : '2026-01-01T10:00:00Z',
+			intervalSeconds: 60,
+			datastores     : [
+				[id: 21L, name: 'ds-1', state: 'unknown', counts: [ok: 2, unknown: 1, degraded: 0, down: 0], hosts: [
+					[hostId: 11L, name: 'host-a', state: 'ok', activePaths: 2, totalPaths: 2, measuredAt: '2026-01-01T10:00:00Z', error: null],
+					[hostId: 12L, name: 'host-b', state: 'ok', activePaths: 2, totalPaths: 2, measuredAt: '2026-01-01T10:00:05Z', error: null],
+					[hostId: 13L, name: 'host-c', state: 'unknown', activePaths: null, totalPaths: null, measuredAt: '2026-01-01T10:00:05Z', error: 'no answer within 30 s']]],
+				[id: 22L, name: 'ds-2', state: 'down', counts: [ok: 0, unknown: 1, degraded: 1, down: 1], hosts: [
+					[hostId: 11L, name: 'host-a', state: 'degraded', activePaths: 1, totalPaths: 2, measuredAt: '2026-01-01T10:00:00Z', error: null],
+					[hostId: 12L, name: 'host-b', state: 'down', activePaths: 0, totalPaths: 0, measuredAt: '2026-01-01T10:00:05Z', error: null],
+					[hostId: 13L, name: 'host-c', state: 'unknown', activePaths: null, totalPaths: null, measuredAt: '2026-01-01T10:00:05Z', error: 'no answer within 30 s']]]
+			]
+		]
+	}
+
+	def 'hosts=false returns counters only'() {
+		given:
+		directory.clusterVisible(admin, 7L) >> true
+		directory.datastores(admin, 7L) >> [new SharedDatastore(22L, 'ds-2', 'lun2')]
+
+		expect:
+		controller.paths(model(admin, [clusterId: '7', hosts: 'false'])).data.datastores ==
+			[[id: 22L, name: 'ds-2', state: 'down', counts: [ok: 0, unknown: 1, degraded: 1, down: 1]]]
+		controller.paths(model(admin, [clusterId: '7', hosts: 'yes'])).status == 400
+	}
+
+	def 'times are ISO-8601 in UTC with milliseconds'() {
+		given:
+		snapshot = new Snapshot([(7L): [new HostRef(11L, 'a')]],
+			[(11L): HostMeasurement.success(11L, Instant.parse('2026-01-01T10:00:00.123456789Z'), [:])],
+			Instant.parse('2026-01-01T09:59:59.5Z'))
+		directory.clusterVisible(admin, 7L) >> true
+		directory.datastores(admin, 7L) >> [new SharedDatastore(21L, 'ds-1', 'lun1')]
+
+		when:
+		Map data = controller.paths(model(admin, [clusterId: '7'])).data as Map
+
+		then:
+		data.lastRunAt == '2026-01-01T09:59:59.500Z'
+		data.datastores[0].hosts[0].measuredAt == '2026-01-01T10:00:00.123Z'
+	}
+
+	def 'host names only for users who may see hosts'() {
+		given:
+		directory.clusterVisible(storageOnly, 7L) >> true
+		directory.datastores(storageOnly, 7L) >> [new SharedDatastore(21L, 'ds-1', 'lun1')]
+
+		when:
+		Map data = controller.paths(model(storageOnly, [clusterId: '7'])).data as Map
+
+		then:
+		data.datastores[0].hosts*.name == [null, null, null]
+		data.datastores[0].hosts*.hostId == [11L, 12L, 13L]
+	}
+
+	def 'a visible cluster without collected hosts reports its datastores as unknown'() {
+		given:
+		directory.clusterVisible(admin, 8L) >> true
+		directory.datastores(admin, 8L) >> [new SharedDatastore(31L, 'ds-x', 'lunx')]
+
+		when:
+		Map data = controller.paths(model(admin, [clusterId: '8'])).data as Map
+
+		then:
+		data.state == 'unknown'
+		data.datastores == [[id: 31L, name: 'ds-x', state: 'unknown', counts: [ok: 0, unknown: 0, degraded: 0, down: 0], hosts: []]]
+	}
+
+	def 'a cluster without shared datastores has no state'() {
+		given:
+		directory.clusterVisible(admin, 7L) >> true
+		directory.datastores(admin, 7L) >> []
+
+		expect:
+		controller.paths(model(admin, [clusterId: '7'])).data == [clusterId: 7L, state: null,
+			lastRunAt: '2026-01-01T10:00:00Z', intervalSeconds: 60, datastores: []]
+	}
+
+	@Unroll
+	def 'refuses user #user.id with 403 without asking the directory'() {
+		when:
+		JsonResponse response = controller.paths(model(user, [clusterId: '7']))
+
+		then:
+		response.status == 403
+		0 * directory._
+
+		where:
+		user << [noStorage, noCluster, new User(id: 9L, account: master)]
+	}
+
+	def 'refuses requests without user'() {
+		expect:
+		controller.paths(model(null, [clusterId: '7'])).status == 403
+	}
+
+	def 'invisible or unknown cluster is 404 and its datastores are not read'() {
+		when:
+		JsonResponse response = controller.paths(model(admin, [clusterId: '7']))
+
+		then:
+		1 * directory.clusterVisible(admin, 7L) >> false
+		0 * directory.datastores(_, _)
+		response.status == 404
+	}
+
+	@Unroll
+	def 'bad clusterId #value is 400'() {
+		expect:
+		controller.paths(model(admin, value == null ? [:] : [clusterId: value])).status == 400
+
+		where:
+		value << [null, '', 'abc', '7;1']
+	}
+
+	def 'only GET'() {
+		expect:
+		controller.paths(model(admin, [clusterId: '7'], 'POST')).status == 405
+	}
+
+	def 'errors are 500 without details'() {
+		given:
+		directory.clusterVisible(admin, 7L) >> { throw new IllegalStateException('database secret') }
+
+		when:
+		JsonResponse response = controller.paths(model(admin, [clusterId: '7']))
+
+		then:
+		response.status == 500
+		response.data == [error: 'internal error']
+	}
+
+	private ViewModel model(User user, Map params = [:], String method = 'GET') {
+		HttpServletRequest request = Stub {
+			getParameter(_) >> { String name -> params[name] }
+			getMethod() >> method
+		}
+		new ViewModel(user: user, request: request, response: Mock(HttpServletResponse))
+	}
+}
