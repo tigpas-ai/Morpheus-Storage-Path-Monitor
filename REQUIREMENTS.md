@@ -33,6 +33,24 @@ the first path of each LUN, although a host typically has several.
 | Error texts | fixed English texts, never command output | Output may contain host details |
 | Log | warning on each state change per host/device (first measurement: only devices that are not ok) | Visible in the Morpheus log without a consumer |
 
+## Detail page (0.3.0)
+Requirement: a detail page in the Morpheus UI, so the plugin can be used on its own, ideally as fourth entry under
+*Clusters → <cluster> → Storage*, with a stable link for other plugins.
+
+- The plugin API 1.4.1 offers `ClusterTabProvider` (`renderTemplate(cluster)`, `show(cluster, user, account)`) for
+  **main tabs** of the cluster page only. The entries under Storage (Data Stores, Volumes, Storage Interfaces) are fixed
+  markup of the page (Bootstrap pills `#storage .nav-pills` with a `.tab-content`); there is no extension point for them.
+- Chosen: cluster tab provider; its script moves the tab into the storage pills while the page is parsed. If the
+  structure is not found, the main tab stays (fallback). The view itself is static markup; data comes from the route.
+- Verified: Morpheus renders the tab as `<a href="#storage-path-monitor-tab" data-toggle="tab">` with the pane
+  `#storage-path-monitor-tab`; the page selects tabs and pills from `#!<id>` in the URL (also the parent tab of a
+  pill). Query parameters on the cluster page are ignored by Morpheus (`200`).
+- Verified: `show()` receives the user **without** tenant (`user.account` is `null`); the tenant comes as `account`.
+  The tenant check and the scope of the cluster query (`DataQuery.account`) use it. `user.permissions` is filled.
+- Links of the view: data store page `/infrastructure/storage/data-stores/<id>` and host page
+  `/infrastructure/servers/<id>` (both verified, `200`).
+- Assets via `{{asset '/…'}}` and `nonce`, served under `/assets/plugin/storage-path-monitor/`.
+
 ## Findings (verified on a test appliance, Morpheus 9.1)
 - `hvmcli storage multipath status --json` exists (hvmcli 1.0.0), answer in about 0.3 s directly on the host;
   through the agent including loading the host about 2.5–5.5 s. Example per device:
@@ -61,10 +79,14 @@ the first path of each LUN, although a host typically has several.
 | B: iSCSI session to portal 2 logged out | the paths disappear: multipath reports **1/1** (`paths` 1) | 0.1.0: `ok` 1/1 (wrong). → 0.2.0 compares with the other hosts (`expectedPaths`) and reports `degraded`. After login 2/2 within 30 s |
 | C: traffic to both portals dropped | after a few seconds GFS2 withdraws the file system (`Error -5 writing to journal`), followed by a kernel BUG in the GFS2 glock code → kernel panic, kdump, reboot (twice, about 2 min) | host unreachable → `unknown` with `no answer within 30 s`; `ok` again after the reboot once multipath and the mounts are back |
 
+| C again, with I/O queueing for 60 s (`no_path_retry 12`), outage about 50 s | multipath 0/2 active, I/O queued; no withdraw, no reboot; I/O continues afterwards | `down` 0/2 after about 30 s; `ok` 2/2 again about 30 s after the rule was removed |
+| C again, with queueing, outage about 100 s | after the queueing time ran out: same withdraw and kernel BUG, reboot | `down` 0/2 while the host was up, then `unknown` until it was back |
+
 Conclusions:
-- With all paths lost and no I/O queueing (`features='0'`), a host with mounted GFS2 datastores does not stay up long
-  enough to be seen as `down` from the manager; it is reported as `unknown`. `down` remains relevant for a single LUN
-  that is lost (unmapped, missing on one host) while the host keeps running.
+- Without I/O queueing (`features='0'`), a host with mounted GFS2 datastores does not stay up long enough after
+  losing all paths to be seen as `down`; it is reported as `unknown`. With queueing, `down` is reported for as long as
+  the host survives (verified). `down` is also relevant for a single LUN that is lost (unmapped, missing on one host)
+  while the host keeps running.
 - The other hosts keep running; the failed host leaves the DLM lockspaces and rejoins after the reboot.
 
 ## Open points

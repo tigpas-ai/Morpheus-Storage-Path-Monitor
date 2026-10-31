@@ -50,6 +50,14 @@ class AccessPolicySpec extends Specification {
 		null      | false  | 5L    || false
 	}
 
+	def 'tenant check with the tenant given separately'() {
+		expect:
+		policy.canSeeTenant(new Account(id: 5L, masterAccount: false), 5L)
+		!policy.canSeeTenant(new Account(id: 5L, masterAccount: false), 6L)
+		policy.canSeeTenant(new Account(id: 1L, masterAccount: true), 6L)
+		!policy.canSeeTenant((Account) null, 5L)
+	}
+
 	def 'no user, no access'() {
 		expect:
 		!policy.canSeeTenant(null, 1L)

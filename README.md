@@ -11,6 +11,8 @@ read-only interface for other plugins and tools.
   measurement, error of the query.
 - Plugin route `GET /plugin/storage-path-monitor/paths?clusterId=<id>` returning counters and states only (no raw
   command output), for users with storage read permission and visibility of the cluster. → [`CONTRACT.md`](CONTRACT.md)
+- Detail view **Multipath Status** on each HVM cluster (*Clusters → <cluster> → Storage → Multipath Status*): state per
+  data store, expandable to the hosts with paths, time of measurement and errors; linkable (see `CONTRACT.md`).
 - State changes (e.g. a LUN going from `ok` to `degraded` on a host) are written to the Morpheus log as warnings.
 
 ## Settings

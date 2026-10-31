@@ -1,0 +1,24 @@
+<div id="spm-root" class="spm-root" data-spm-cluster-id="{{clusterId}}" data-spm-version="{{version}}">
+	<div class="spm-toolbar">
+		<span class="spm-summary" aria-live="polite"></span>
+		<span class="spm-updated"></span>
+		<button type="button" class="btn btn-link spm-reload">Reload</button>
+	</div>
+	<div class="spm-message" role="status">Loading path states…</div>
+	<table class="table spm-table" hidden>
+		<thead>
+			<tr>
+				<th class="spm-col-toggle"><span class="sr-only">Details</span></th>
+				<th>Data Store</th>
+				<th>State</th>
+				<th>Hosts</th>
+			</tr>
+		</thead>
+		<tbody></tbody>
+	</table>
+	<p class="spm-note">Paths per host are measured in the background (interval <span class="spm-interval">–</span> s).
+		<em>degraded</em>: not all paths active, or fewer paths than the other hosts. <em>down</em>: no path active or
+		LUN missing. <em>unknown</em>: host not measured or not reachable.</p>
+</div>
+<link rel="stylesheet" href="{{asset '/storage-path-monitor.css'}}?v={{assetVersion}}">
+<script src="{{asset '/storage-path-monitor.js'}}?v={{assetVersion}}" nonce="{{nonce ''}}"></script>

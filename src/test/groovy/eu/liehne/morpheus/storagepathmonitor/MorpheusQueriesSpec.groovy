@@ -42,7 +42,26 @@ class MorpheusQueriesSpec extends Specification {
 		queries.clusterVisible(masterUser, 7L)
 		!queries.clusterVisible(masterUser, 8L)
 		!queries.clusterVisible(null, 7L)
+		queries.clusterVisible(new User(id: 2L), 7L, new Account(id: 1L, masterAccount: true))
+		!queries.clusterVisible(new User(id: 2L), 7L, new Account(id: 5L, masterAccount: false))
+		queries.clusterVisible(new User(id: 2L), 7L, new Account(id: 6L, masterAccount: false))
+		!queries.clusterVisible(new User(id: 2L), 7L)
+		!queries.clusterVisible(new User(id: 2L), 7L, null)
 		seen.every { it.propertyList == MorpheusQueries.CLUSTER_PROPS && it.max == MorpheusQueries.MAX_ROWS }
+	}
+
+	def 'a user without tenant gets the tenant handed over as query scope'() {
+		given:
+		Account tenant = new Account(id: 6L, masterAccount: false)
+		DataQuery seen = null
+		clusters.listOptions(_) >> { DataQuery q -> seen = q; [[id: 7L, 'owner.id': 6L]] }
+
+		when:
+		boolean visible = queries.clusterVisible(new User(id: 2L), 7L, tenant)
+
+		then:
+		visible
+		seen.account.is(tenant)
 	}
 
 	def 'datastores: own tenant, own cluster, multipath device only, sorted by name'() {

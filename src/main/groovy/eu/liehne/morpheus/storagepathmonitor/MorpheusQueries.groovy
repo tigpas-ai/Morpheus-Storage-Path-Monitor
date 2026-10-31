@@ -2,6 +2,7 @@ package eu.liehne.morpheus.storagepathmonitor
 
 import com.morpheusdata.core.MorpheusContext
 import com.morpheusdata.core.data.DataQuery
+import com.morpheusdata.model.Account
 import com.morpheusdata.model.User
 import groovy.json.JsonSlurper
 import groovy.util.logging.Slf4j
@@ -16,6 +17,9 @@ interface ClusterInventory {
 interface UserDirectory {
 	/** {@code true} if the HVM cluster exists and the user may see it */
 	boolean clusterVisible(User user, Long clusterId)
+
+	/** Same, with the user's tenant given separately (tab providers get the user without its tenant) */
+	boolean clusterVisible(User user, Long clusterId, Account tenant)
 
 	/** Shared-LUN datastores of the cluster that the user may see */
 	List<SharedDatastore> datastores(User user, Long clusterId)
@@ -77,12 +81,21 @@ class MorpheusQueries implements ClusterInventory, UserDirectory {
 
 	@Override
 	boolean clusterVisible(User user, Long clusterId) {
-		if (user == null || clusterId == null) {
+		return clusterVisible(user, clusterId, user?.account)
+	}
+
+	@Override
+	boolean clusterVisible(User user, Long clusterId, Account tenant) {
+		if (user == null || clusterId == null || tenant?.id == null) {
 			return false
 		}
 		DataQuery query = new DataQuery(user).withFilter('id', clusterId).withFilter('type.code', CLUSTER_TYPE_CODE)
+		if (query.account == null) {
+			// user without tenant (tab providers): scope the query to the tenant handed over separately
+			query.account = tenant
+		}
 		Map cluster = rows(morpheus.services.cluster, query, CLUSTER_PROPS).find { (it.id as Long) == clusterId }
-		return cluster != null && accessPolicy.canSeeTenant(user, cluster['owner.id'] as Long)
+		return cluster != null && accessPolicy.canSeeTenant(tenant, cluster['owner.id'] as Long)
 	}
 
 	@Override

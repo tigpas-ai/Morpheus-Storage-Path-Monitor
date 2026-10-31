@@ -38,6 +38,7 @@ class StoragePathMonitorPlugin extends Plugin {
 		collector = new PathCollector(queries, new AgentCommandRunner(this.morpheus), settings)
 		this.controllers.add(new PathsController(this, this.morpheus, queries,
 			{ collector.snapshot } as Supplier<Snapshot>, settings, accessPolicy))
+		this.registerProvider(new MultipathStatusTabProvider(this, this.morpheus, queries, accessPolicy))
 		collector.start()
 	}
 

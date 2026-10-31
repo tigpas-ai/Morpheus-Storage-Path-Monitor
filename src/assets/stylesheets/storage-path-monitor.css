@@ -1,0 +1,79 @@
+/* Storage Path Monitor – "Multipath Status" tab. Scoped to #spm-root; colors follow common status conventions. */
+#spm-root .spm-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin: 8px 0;
+}
+
+#spm-root .spm-updated {
+	color: #6b7280;
+}
+
+#spm-root .spm-reload {
+	margin-left: auto;
+}
+
+#spm-root .spm-col-toggle {
+	width: 32px;
+}
+
+#spm-root .spm-toggle {
+	padding: 0 6px;
+}
+
+#spm-root .spm-badge {
+	display: inline-block;
+	min-width: 72px;
+	padding: 1px 8px;
+	border-radius: 10px;
+	font-size: 12px;
+	font-weight: 600;
+	text-align: center;
+	color: #fff;
+}
+
+#spm-root .spm-ok {
+	background: #2e7d32;
+}
+
+#spm-root .spm-degraded {
+	background: #b26a00;
+}
+
+#spm-root .spm-down {
+	background: #c62828;
+}
+
+#spm-root .spm-unknown {
+	background: #616161;
+}
+
+#spm-root .spm-detail > td {
+	padding: 0 0 8px 40px;
+	border-top: none;
+}
+
+#spm-root .spm-hosts {
+	margin: 0;
+}
+
+#spm-root .spm-error {
+	color: #c62828;
+}
+
+#spm-root .spm-focus {
+	outline: 2px solid #1976d2;
+	outline-offset: -2px;
+}
+
+#spm-root .spm-message,
+#spm-root .spm-empty,
+#spm-root .spm-note {
+	color: #6b7280;
+}
+
+#spm-root .spm-note {
+	margin-top: 12px;
+	font-size: 12px;
+}

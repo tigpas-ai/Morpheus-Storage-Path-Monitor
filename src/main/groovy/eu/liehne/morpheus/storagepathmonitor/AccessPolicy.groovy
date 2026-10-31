@@ -1,5 +1,6 @@
 package eu.liehne.morpheus.storagepathmonitor
 
+import com.morpheusdata.model.Account
 import com.morpheusdata.model.User
 
 /**
@@ -36,7 +37,11 @@ class AccessPolicy {
 	 * only objects owned by their own tenant.
 	 */
 	boolean canSeeTenant(User user, Long ownerId) {
-		def account = user?.account
+		return canSeeTenant(user?.account, ownerId)
+	}
+
+	/** Same check with the user's tenant given separately (tab providers get the user without its tenant) */
+	boolean canSeeTenant(Account account, Long ownerId) {
 		if (account?.id == null) {
 			return false
 		}

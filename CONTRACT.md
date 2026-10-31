@@ -10,6 +10,28 @@ The plugin is optional for consumers. It is installed and active if `GET /api/pl
 `code == "storage-path-monitor"`, `enabled == true` and `status == "loaded"`. In the browser, a consumer can simply
 call the route: `404` from Morpheus for the whole path (HTML instead of JSON) means the plugin is not installed.
 
+## Detail page (since 0.3.0)
+
+The path states are shown on the detail page of each HVM cluster as **Multipath Status**:
+*Infrastructure → Clusters → <cluster> → Storage → Multipath Status* (fourth entry next to Data Stores, Volumes,
+Storage Interfaces). If the storage sub-navigation of the page is not found (e.g. a changed Morpheus page layout), the
+same view is a main tab of the cluster page instead.
+
+### Link
+```
+/infrastructure/clusters/<clusterId>[?spm-datastore=<datastoreId>[&spm-host=<hostId>]]#!storage-path-monitor-tab
+```
+- `#!storage-path-monitor-tab` opens the view (works in both placements; Morpheus selects the parent tab itself).
+- `spm-datastore` (optional): opens the host list of that data store, marks it and scrolls to it.
+- `spm-host` (optional, together with `spm-datastore`): marks that host in the list.
+- Unknown or invisible ids are ignored; the page then shows the normal view.
+- Example: `/infrastructure/clusters/1?spm-datastore=21&spm-host=3#!storage-path-monitor-tab`.
+
+### Visibility
+The entry is only shown on HVM clusters (`mvm-cluster`) that the user may see, and only with the same role
+permissions as the route below. The page loads its data from the route with the user's session, so the route's checks
+apply unchanged. It loads when it is opened and reloads every 30 s while it is visible.
+
 ## `GET /plugin/storage-path-monitor/paths`
 
 Path states of the shared-LUN datastores of one HVM cluster, per datastore and host.

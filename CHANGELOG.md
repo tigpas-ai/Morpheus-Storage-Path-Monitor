@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+- Detail view "Multipath Status" on the cluster page (cluster tab provider), placed as fourth entry under Storage when
+  the page has that sub-navigation, otherwise as a main tab. Linkable with `#!storage-path-monitor-tab` and the
+  optional parameters `spm-datastore` and `spm-host` (see `CONTRACT.md`).
+
 ## 0.2.0
 - A host with fewer paths for a LUN than the other hosts of the cluster is `degraded`, even if all its remaining
   paths are active (multipath forgets removed paths, e.g. after an iSCSI logout, and reports 1/1).
