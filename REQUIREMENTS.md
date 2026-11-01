@@ -70,7 +70,13 @@ Requirement: a detail page in the Morpheus UI, so the plugin can be used on its 
 - Disabling the plugin (`PUT /api/plugins/:id` with `enabled: false`) calls `onDestroy` (collection stops, the route
   answers `404`); enabling it again calls `initialize` (collection starts again). Verified.
 - Permissions (verified with test users): `infrastructure-storage` read + `infrastructure-cluster` read without
-  `admin-servers` → `200` without host names; without `infrastructure-storage` → `403`.
+  `admin-servers` → `200` without host names; `infrastructure-storage` set to `none` → `403` (JSON from the plugin).
+  If the role has no entry for `infrastructure-storage` at all (never set), Morpheus refuses the route itself with
+  `404` and its HTML error page – the plugin is not called.
+- Plugin installation over the API (verified for the integration test): uploading an **older** version is accepted
+  (downgrade, e.g. 0.3.0 → 0.2.0); an upload keeps the plugin id and the settings (`config`), but **enables** a
+  disabled plugin. `PUT /api/plugins/:id` with `config` replaces the whole settings object. `DELETE /api/plugins/:id`
+  removes the plugin (assets and route answer `404` afterwards); a new installation gets a new id and empty settings.
 
 ## Path failure tests (test appliance, one host of three, two iSCSI portals, one target, 10 LUNs)
 | Test | What happened on the host | Plugin (interval 15 s) |

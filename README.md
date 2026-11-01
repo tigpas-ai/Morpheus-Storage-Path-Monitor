@@ -47,6 +47,13 @@ Requires JDK 17 (the code is compiled for Java 11; the Gradle wrapper runs on Ja
 Install the JAR under *Administration → Integrations → Plugins → Upload File* or with `POST /api/plugins/upload`
 (multipart field `file`). The first collection run starts about 30 s after the plugin is loaded.
 
+## Tests
+- Unit tests: `./gradlew test` (no appliance needed).
+- Integration test against a live appliance: `scripts/integration-test.sh` installs the built plugin, checks status,
+  settings, route, permissions and the cluster page, and then restores the previous state (the previously installed
+  version with its settings and enabled flag, or no plugin). Connection only through environment variables
+  (`MORPHEUS_URL`, `MORPHEUS_TOKEN`, …) – see [`docs/integration-test.md`](docs/integration-test.md).
+
 ## Requirements on the hosts
 - HVM hosts with the Morpheus agent installed and connected.
 - `hvmcli` on the host (part of HVM). Multipath device names must match the datastore block device

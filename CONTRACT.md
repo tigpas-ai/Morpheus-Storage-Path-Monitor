@@ -57,9 +57,10 @@ Path states of the shared-LUN datastores of one HVM cluster, per datastore and h
 - Host names are only returned with **Infrastructure: Compute** (`admin-servers`) at least `read`; otherwise `name`
   is `null` and only the host id is given. Host ids and their states are returned to every user who may see the
   cluster and the datastore (the state of a datastore is a property of the datastore on each host).
-- The route is registered with the permission `infrastructure-storage`; Morpheus itself only checks that a session
-  exists. Without a session Morpheus answers `302` (redirect to the login page). Every other refusal comes from the
-  plugin as JSON (verified: a user without `infrastructure-storage` gets the JSON `403`).
+- The route is registered with the permission `infrastructure-storage`. Without a session Morpheus answers `302`
+  (redirect to the login page). If the user's role has no entry at all for `infrastructure-storage` (never set),
+  Morpheus refuses the route itself with `404` and its HTML error page; with the permission set to `none` the plugin
+  answers the JSON `403`. Consumers should treat any non-JSON answer like "not available".
 
 ### Response `200`
 ```json
@@ -130,14 +131,15 @@ Possible `error` texts (consumers should display, not parse them): `no answer wi
 `unexpected command output`, `command reported error code <n>`, `measurement failed`.
 
 ### Errors
-From the plugin always JSON `{"error": "<text>"}` with UTF-8 (only the `302` comes from Morpheus).
+From the plugin always JSON `{"error": "<text>"}` with UTF-8 (the `302` and the HTML `404` come from Morpheus).
 
 | Status | When |
 |---|---|
 | `302` | no UI session (from Morpheus, redirect to the login page, not JSON) |
+| `404` (HTML) | from Morpheus: plugin not installed or disabled, or the role has no entry for `infrastructure-storage` |
 | `400` | `clusterId` missing or not a number, `hosts` not `true`/`false` |
-| `403` | not signed in or missing role permission |
-| `404` | cluster unknown, not an HVM cluster, or not visible to the user |
+| `403` | missing role permission (see Permissions) |
+| `404` (JSON) | cluster unknown, not an HVM cluster, or not visible to the user |
 | `405` | method other than `GET` |
 | `500` | internal error (details only in the Morpheus log) |
 
