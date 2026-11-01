@@ -69,11 +69,17 @@
 
 #spm-root .spm-message,
 #spm-root .spm-empty,
-#spm-root .spm-note {
+#spm-root .spm-note,
+#spm-root .spm-about {
 	color: #6b7280;
 }
 
 #spm-root .spm-note {
 	margin-top: 12px;
+	font-size: 12px;
+}
+
+#spm-root .spm-about {
+	margin-top: 4px;
 	font-size: 12px;
 }

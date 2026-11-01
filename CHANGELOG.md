@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- "Multipath Status" page shows version, author, license and a link to the source code at the bottom.
 - Integration test against a live appliance (`scripts/integration-test.sh`, see `docs/integration-test.md`): installs
   the built plugin, checks status, settings, assets, route (against `CONTRACT.md`), disable/enable, permissions and
   the cluster page, and restores the previous state afterwards – including an older version, its settings and its

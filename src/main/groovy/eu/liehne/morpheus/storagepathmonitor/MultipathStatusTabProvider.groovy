@@ -60,7 +60,9 @@ class MultipathStatusTabProvider extends AbstractClusterTabProvider {
 	@Override
 	HTMLResponse renderTemplate(ComputeServerGroup cluster) {
 		ViewModel<Object> model = new ViewModel<>()
-		model.object = [clusterId: cluster.id, assetVersion: assetVersion(), version: plugin?.version ?: '']
+		model.object = [clusterId: cluster.id, assetVersion: assetVersion(), version: plugin?.version ?: '',
+					   author: StoragePathMonitorPlugin.AUTHOR, license: StoragePathMonitorPlugin.LICENSE_NAME,
+					   repositoryUrl: StoragePathMonitorPlugin.REPOSITORY_URL]
 		return getRenderer().renderTemplate('hbs/multipathStatusTab', model)
 	}
 
