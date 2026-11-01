@@ -14,6 +14,8 @@ import java.util.function.Supplier
 class StoragePathMonitorPlugin extends Plugin {
 
 	static final String CODE = 'storage-path-monitor'
+	static final String AUTHOR = 'Pascal Liehne'
+	static final String REPOSITORY_URL = 'https://github.com/tigpas-ai/morpheus-storage-path-monitor'
 
 	private PathCollector collector
 
@@ -25,7 +27,9 @@ class StoragePathMonitorPlugin extends Plugin {
 	@Override
 	void initialize() {
 		this.setName('Storage Path Monitor')
-		this.setAuthor('Pascal Liehne')
+		this.setAuthor(AUTHOR)
+		this.setSourceCodeLocationUrl(REPOSITORY_URL)
+		this.setIssueTrackerUrl("${REPOSITORY_URL}/issues".toString())
 		this.setDescription('Monitors the multipath storage paths of shared-LUN datastores on HVM hosts')
 		// Own renderer: with controllers, Morpheus 9.1 otherwise adds the plugin's templates to the shared renderer,
 		// which fails (UnsupportedOperationException in DynamicTemplateLoader)

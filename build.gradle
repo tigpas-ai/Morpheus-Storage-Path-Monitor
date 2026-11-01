@@ -73,9 +73,18 @@ jar {
                 'Morpheus-Logo': 'assets/morpheus.svg',
                 'Morpheus-Logo-Dark': 'assets/morpheus.svg',
                 'Morpheus-Labels': 'Plugin',
-                'Morpheus-Min-Appliance-Version': "9.1.0"
+                'Morpheus-Min-Appliance-Version': "9.1.0",
+                'Implementation-Title': 'morpheus-storage-path-monitor',
+                'Implementation-Version': version,
+                'Implementation-Vendor': 'Pascal Liehne',
+                'Implementation-URL': 'https://github.com/tigpas-ai/morpheus-storage-path-monitor'
         )
     }
+}
+
+// The license travels with the jar
+tasks.withType(Jar).configureEach {
+    from('LICENSE') { into 'META-INF' }
 }
 
 assets {

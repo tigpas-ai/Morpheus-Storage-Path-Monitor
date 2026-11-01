@@ -1,0 +1,7 @@
+# Keep LF line endings on every platform (the integration test and gradlew must run as they are checked out).
+* text=auto eol=lf
+# Windows batch file of the Gradle wrapper
+*.bat text eol=crlf
+# Binary files
+*.jar binary
+*.png binary
