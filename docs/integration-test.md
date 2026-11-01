@@ -30,7 +30,7 @@ the plugin is acceptable.
 | `MORPHEUS_TOKEN` | yes | API token (System Admin) |
 | `MORPHEUS_CACERT` | no | CA file (PEM) to validate the server certificate against |
 | `MORPHEUS_INSECURE` | no | `1` = skip certificate validation |
-| `LAB_TEST_PREFIX` | no | name prefix for test objects (default `spmtest-`); the test creates `<prefix>spm-it` |
+| `TEST_PREFIX` | no | name prefix for test objects (default `spmtest-`; `LAB_TEST_PREFIX` is read as a fallback); the test creates `<prefix>spm-it` |
 | `SPM_TEST_JAR` | no | jar to test (same as `--jar`); default: build the working tree with `./gradlew shadowJar` |
 | `SPM_RESTORE_JAR` | no | jar of the version installed before the test (same as `--restore-jar`); default: built from the git tag `v<installed version>` |
 | `SPM_TEST_CLUSTER_ID` | no | test only this HVM cluster; default: every HVM cluster the route accepts |

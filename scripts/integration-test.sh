@@ -11,6 +11,9 @@
 # Exit codes: 0 all checks passed · 1 checks failed (appliance restored) · 2 stopped before any change
 #             3 restoring the previous state failed – check the appliance by hand · 64 usage error
 
+# jq programs and `bash -c` snippets reference their own variables inside single quotes on purpose
+# shellcheck disable=SC2016
+
 set -Eeuo pipefail
 
 PLUGIN_CODE=storage-path-monitor
@@ -33,7 +36,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-PREFIX=${LAB_TEST_PREFIX:-spmtest-}
+PREFIX=${TEST_PREFIX:-${LAB_TEST_PREFIX:-spmtest-}}
 TEST_NAME="${PREFIX}spm-it"
 LOAD_TIMEOUT=${SPM_TEST_LOAD_TIMEOUT:-180}
 RUN_TIMEOUT=${SPM_TEST_RUN_TIMEOUT:-240}
@@ -178,9 +181,9 @@ remove_test_objects() {
   ui_logout
   # own objects of this run and leftovers of aborted runs (exact names only); users first, they hold the role
   ids=$(test_object_ids users) || ids=""
-  for id in $(printf '%s\n' $ids $USER_ID | sort -u); do api_ok DELETE "/api/users/$id" || true; done
+  for id in $(printf '%s\n' "$ids" "$USER_ID" | sort -u); do api_ok DELETE "/api/users/$id" || true; done
   ids=$(test_object_ids roles) || ids=""
-  for id in $(printf '%s\n' $ids $ROLE_ID | sort -u); do api_ok DELETE "/api/roles/$id" || true; done
+  for id in $(printf '%s\n' "$ids" "$ROLE_ID" | sort -u); do api_ok DELETE "/api/roles/$id" || true; done
   USER_ID="" ROLE_ID=""
   local users roles
   users=$(test_object_ids users) || return 1
@@ -205,7 +208,7 @@ restore_plugin() {
   local version code
   version=$(jq -r .version <<<"$INITIAL")
   code=$(upload "$RESTORE_JAR")
-  [[ $code == 200 ]] && jq -e '.success == true' "$TMP/upload" >/dev/null 2>&1 \
+  { [[ $code == 200 ]] && jq -e '.success == true' "$TMP/upload" >/dev/null 2>&1; } \
     || { info "upload of $version failed (HTTP $code): $(head -c 300 "$TMP/upload")"; return 1; }
   sleep 5   # with the same version as under test, the entry looks loaded before the reload has finished
   now=$(wait_loaded "$version") || { info "version $version did not load: $now"; return 1; }
@@ -316,8 +319,8 @@ api_ok POST /api/roles "$(jq -cn --arg n "$TEST_NAME" \
   || abort "cannot create test role (HTTP response: $(head -c 300 "$TMP/body"))"
 ROLE_ID=$(jq -r '.role.id' "$TMP/body")
 set_perm() { api_ok PUT "/api/roles/$ROLE_ID/update-permission" "$(jq -cn --arg c "$1" --arg a "$2" '{permissionCode: $c, access: $a}')"; }
-set_perm infrastructure-storage read && set_perm infrastructure-cluster read && set_perm admin-servers read \
-  && api_ok PUT "/api/roles/$ROLE_ID/update-group" '{"allGroups":true,"access":"read"}' \
+{ set_perm infrastructure-storage read && set_perm infrastructure-cluster read && set_perm admin-servers read \
+  && api_ok PUT "/api/roles/$ROLE_ID/update-group" '{"allGroups":true,"access":"read"}'; } \
   || abort "cannot set permissions of the test role"
 UI_USER=$TEST_NAME
 UI_PASSWORD="Spm-$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 20)-7x"
@@ -378,7 +381,8 @@ else
     [[ $(route "clusterId=$id&hosts=false" | cut -d' ' -f1) == 200 ]] && CLUSTERS+="$id "
   done
 fi
-CLUSTERS=$(echo $CLUSTERS)
+read -r -a cluster_ids <<<"$CLUSTERS"
+CLUSTERS="${cluster_ids[*]}"   # single spaces, no leading or trailing blank
 if [[ -z $CLUSTERS ]]; then
   warn "no HVM cluster found – route data checks skipped (set SPM_TEST_CLUSTER_ID to name one)"
 else
