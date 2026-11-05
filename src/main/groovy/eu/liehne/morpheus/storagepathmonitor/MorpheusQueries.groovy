@@ -54,10 +54,10 @@ class MorpheusQueries implements ClusterInventory, UserDirectory {
 
 	static final List<String> CLUSTER_PROPS = ['id', 'owner.id']
 	static final List<String> HOST_PROPS = ['id', 'name', 'serverGroup.id', 'parentServer.id']
-	static final List<String> DATASTORE_PROPS = ['id', 'name', 'refType', 'refId', 'config', 'owner.id', 'status', 'externalPath']
+	static final List<String> DATASTORE_PROPS = ['id', 'name', 'refType', 'refId', 'config', 'owner.id', 'status', 'externalPath', 'externalId']
 	/**
-	 * Status of a datastore while Morpheus works on it. Not {@code warning}: Morpheus sets that when the mount is missing
-	 * on a host ("Check host(s) … status"), during the rollout to the other hosts as well as when it failed.
+	 * Status of a datastore while Morpheus works on it. Not {@code warning}: Morpheus sets that when a host has a problem
+	 * with the datastore ("Check host(s) … status"), which is what the plugin is there to show.
 	 */
 	static final List<String> STATUS_IN_PROGRESS = ['provisioning', 'deprovisioning', 'removing']
 
@@ -162,7 +162,7 @@ class MorpheusQueries implements ClusterInventory, UserDirectory {
 			.collect { Map it ->
 				String device = deviceOf(it)
 				device == null ? null : new SharedDatastore(it.id as Long, it.name as String, device,
-					!(it.status in STATUS_IN_PROGRESS))
+					!(it.status in STATUS_IN_PROGRESS), it.externalId as String)
 			}
 			.findAll { it != null }
 			.sort { a, b -> (a.name ?: '') <=> (b.name ?: '') ?: a.id <=> b.id }

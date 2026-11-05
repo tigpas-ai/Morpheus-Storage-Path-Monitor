@@ -24,6 +24,8 @@ the first path of each LUN, although a host typically has several.
 7. **Mounts without a datastore (0.4.0):** a GFS2 mount that stays on a host after the datastore was removed from
    Morpheus must be visible on the status page. The documentation describes the cause: if unmounting fails while a
    datastore is removed, Morpheus logs a warning and continues (docs 9.1.0 p. 2410).
+8. **Storage pool per datastore and host (0.5.0):** a mounted file system is not enough, libvirt needs an active pool on
+   the host. Inactive or missing counts as `down`.
 
 ## Design decisions
 | Topic | Decision | Reason |
@@ -40,6 +42,7 @@ the first path of each LUN, although a host typically has several.
 | Log | warning on each state change per host/device (first measurement: only devices that are not ok) | Visible in the Morpheus log without a consumer |
 | Mount command | `findmnt --list --json --output SOURCE,TARGET,FSTYPE,MAJ:MIN`, GFS2 selected by the parser | Reads the kernel table only, so it also answers on a hanging file system. With `-t gfs2`, findmnt ends with exit code 1 if nothing matches, which looks like a failure. `--list` gives a flat list instead of a tree |
 | Withdraw command | `grep -r --include=id --include=withdraw --exclude-dir=lock_module . /sys/fs/gfs2`, only if the host has GFS2 mounts | One call for all file systems, no shell glob. `id` is `major:minor`, the link to the mount. `lock_module/withdraw` is write-only and would make grep end with exit code 2; the directory is missing without GFS2 mounts |
+| Pool command | `hvmcli storage list --json`; pool ↔ datastore by `externalId` (the pool name), `name` as a fallback | Part of every HVM host, one call for all pools, JSON with `name` and `state` |
 | Failed mount check | `unknown` with the reason in `error`, paths stay valid | The paths were measured; the datastore state on the host is not known |
 | Not mounted, withdrawn | `down`, also on cluster level; no separate state | Consumers that only read `state` see it at once; a new state value would count as `unknown` for them |
 | Datastore being created or removed | status `provisioning` etc., and until a complete run started after that: a missing mount does not lower the state | Expected then, and a measurement from before the mount must not count. `warning` is deliberately not exempt: Morpheus sets it when the mount is missing on a host, also after a failure |
@@ -95,12 +98,13 @@ Requirement: a detail page in the Morpheus UI, so the plugin can be used on its 
   removes the plugin (assets and route answer `404` afterwards); a new installation gets a new id and empty settings.
 
 ## Mount findings (test appliance, one test datastore on a free LUN, three hosts, 0.4.0)
-- Mount points can differ per host: the host that formats a new datastore mounts on the path saved as `externalPath`,
-  the others on another `/mnt/<uuid>`. So the device is the reliable link; `externalPath` is only a second characteristic.
-  `externalPath` is still empty while the datastore is `provisioning`.
-- A new datastore: status `provisioning` for about 2.5 min with no mount, then `provisioned` and `warning`
-  ("Check host(s) … status"). The first host is mounted by then, the others 3–4 min later. The status stayed `warning`
-  for at least 20 min although all hosts had the mount, and the libvirt pool of the other hosts stayed `inactive`.
+- A new datastore, normal case (second attempt, same LUN): status `provisioning` for about 3 min, all hosts mounted with
+  an active pool on the same mount point before it turns `provisioned`. The plugin stayed `ok` throughout, and did not
+  report a false `down` from a measurement taken before the mount.
+- A new datastore, irregular case (first attempt, cause not found, not reproduced): `provisioned` after about 2.5 min with
+  only one host mounted, then `warning` ("Check host(s) … status") for at least 20 min. The other hosts mounted 3–4 min
+  later on a different `/mnt/<uuid>`, and their libvirt pool stayed `inactive`. So the device is the reliable link
+  between mount and datastore; `externalPath` is only a second characteristic and is empty during `provisioning`.
 - Unmount on one host (`umount`): `down` with `mounted: false` after one run, `ok` again after mounting. Morpheus did not
   mount it again by itself within 2.5 min.
 - The reported fault, reproduced: the mount on one host held busy, datastore removed through the API. Morpheus removed the
@@ -108,6 +112,9 @@ Requirement: a detail page in the Morpheus UI, so the plugin can be used on its 
   `orphanMounts` about 2 min after the removal; the entry went away with the unmount.
 - Not observed: a status for removal. The datastore was gone from the API by the first look (30 s), so the values
   `deprovisioning` and `removing` in `MorpheusQueries.STATUS_IN_PROGRESS` are a precaution, only `provisioning` is verified.
+- Pool stopped on one host (`virsh pool-destroy`, the file system stays mounted): `down` with `poolActive: false` after one
+  run, `ok` again after `virsh pool-start`. Morpheus still showed `provisioned` and did not start the pool by itself within
+  about 2 min, so the plugin sees this where Morpheus does not.
 - Not tested with a real withdraw: it can bring the host down (see test C below). Unit tests only.
 
 ## Path failure tests (test appliance, one host of three, two iSCSI portals, one target, 10 LUNs)

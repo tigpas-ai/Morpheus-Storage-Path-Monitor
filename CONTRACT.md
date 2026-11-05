@@ -89,6 +89,7 @@ its hosts that have no datastore.
           "expectedPaths": 2,
           "mounted": true,
           "withdrawn": false,
+          "poolActive": true,
           "measuredAt": "2026-10-31T15:19:23.236Z",
           "error": null
         }
@@ -126,6 +127,7 @@ its hosts that have no datastore.
 | `hosts[].expectedPaths` | number \| null | highest `totalPaths` of this LUN on any measured host of the cluster (since 0.2.0); `null` if the paths could not be measured |
 | `hosts[].mounted` | boolean \| null | the file system of the datastore is mounted on this host (since 0.4.0); `null` if that could not be checked |
 | `hosts[].withdrawn` | boolean \| null | GFS2 withdrew the mounted file system after an I/O error, it cannot be used (since 0.4.0); `false` if not mounted; `null` if that could not be checked |
+| `hosts[].poolActive` | boolean \| null | the libvirt storage pool of the datastore is active on this host (since 0.5.0); `false` also if the pool is missing; `null` if that could not be checked |
 | `hosts[].measuredAt` | string \| null | time the host was last queried (ISO-8601, UTC); `null` if not queried yet |
 | `hosts[].error` | string \| null | why a measurement or check failed (short English text, no command output); `null` on success |
 | `orphanMounts[]` | array | GFS2 mounts on hosts of the cluster for which Morpheus has no datastore (since 0.4.0), also with `hosts=false`; empty if there are none. For example, unmounting failed while the datastore was removed. A mount is listed once two collection runs in a row found it without a datastore, so a datastore being created does not appear here |
@@ -139,16 +141,16 @@ its hosts that have no datastore.
 ### States
 | `state` | Meaning |
 |---|---|
-| `ok` | all paths of the LUN active, the host has as many paths as `expectedPaths`, and the file system is mounted and not withdrawn |
+| `ok` | all paths of the LUN active, the host has as many paths as `expectedPaths`, the file system is mounted and not withdrawn, and the storage pool is active |
 | `degraded` | some, but not all paths active – or all active, but fewer than `expectedPaths` (a path was removed on this host, e.g. iSCSI session logged out: multipath then forgets it and counts 1/1). On cluster level also: a mount without a datastore |
-| `down` | no path active, or the host does not see the LUN at all, or (since 0.4.0) the file system is not mounted or withdrawn on this host |
-| `unknown` | not measured yet, or the last measurement or mount check of the host failed (see `error`) |
+| `down` | no path active, or the host does not see the LUN at all, or (since 0.4.0) the file system is not mounted or withdrawn on this host, or (since 0.5.0) its storage pool is not active there |
+| `unknown` | not measured yet, or the last measurement, mount check or pool check of the host failed (see `error`) |
 
 Severity for combining hosts and datastores: `down` > `degraded` > `unknown` > `ok`.
 
 While Morpheus is creating or removing a datastore, and until one complete collection run has seen it finished, a
-missing mount does not lower the state; `mounted` is still `false`. After that it does, also during the minutes in which
-Morpheus still mounts a new datastore on the remaining hosts (Morpheus itself shows the status `warning` then).
+missing mount or inactive pool does not lower the state; `mounted` and `poolActive` are still `false`. After that it
+does, also if Morpheus reports the datastore as `warning`.
 
 The comparison with `expectedPaths` assumes that all hosts of a cluster are connected to the storage alike. If one
 host has fewer paths by design, it is permanently reported as `degraded`. A host that is switched off or cannot be
@@ -158,7 +160,8 @@ Possible `error` texts (consumers should display, not parse them): `no answer wi
 `command failed with exit code <n>`, `command failed on the host`, `command could not be run on the host`,
 `host not found`, `empty command output`, `command output is not valid JSON`, `command output too large`,
 `unexpected command output`, `command reported error code <n>`, `measurement failed`; for a failed mount check (the
-paths stay valid) one of these after `mount check failed: ` or `withdraw check failed: `.
+paths stay valid) one of these after `mount check failed: `, `withdraw check failed: ` or `pool check failed: `, also
+`command reported an error` and `mount not covered by the command output`.
 
 ### Errors
 From the plugin always JSON `{"error": "<text>"}` with UTF-8 (the `302` and the HTML `404` come from Morpheus).

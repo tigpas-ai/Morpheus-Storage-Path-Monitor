@@ -36,9 +36,10 @@ hosts. To pause it instead, disable the plugin on the same page.
 ## Features
 - Background collection on the manager, independent of any UI: fixed, read-only commands per host covering all
   LUNs, configurable interval (default 60 s), a few hosts in parallel.
-- Result per datastore and host: active/total paths, mounted, withdrawn, state `ok` / `degraded` / `down` / `unknown`,
-  time of measurement, error of the query. A host with fewer paths for a LUN than the other hosts of the cluster is
-  `degraded`; a datastore that is not mounted or withdrawn on a host is `down` there, even if all paths are active.
+- Result per datastore and host: active/total paths, mounted, withdrawn, storage pool active, state `ok` / `degraded` /
+  `down` / `unknown`, time of measurement, error of the query. A host with fewer paths for a LUN than the other hosts of
+  the cluster is `degraded`; a datastore that is not mounted, withdrawn or has no active storage pool on a host is `down`
+  there, even if all paths are active.
 - Mounts without a data store: GFS2 file systems still mounted on a host although Morpheus has no datastore for them,
   for example because unmounting failed when the datastore was removed. Listed on the page and in the route; they
   raise the cluster state to `degraded`.
@@ -58,7 +59,7 @@ hosts. To pause it instead, disable the plugin on the same page.
 | Hosts in parallel | 4 | 1–16 | hosts queried at the same time |
 | Command timeout (seconds) | 30 | 5–300 | upper bound for each command on one host |
 
-Example: 16 hosts with 4 in parallel and about 15 s per host (three commands) take about 60 s per run.
+Example: 16 hosts with 4 in parallel and about 20 s per host (four commands) take about 80 s per run.
 
 ## Requirements on the hosts
 - HVM hosts with the Morpheus agent installed and connected.
@@ -66,10 +67,11 @@ Example: 16 hosts with 4 in parallel and about 15 s per host (three commands) ta
   device (`/dev/mapper/<name>`), which is the case for datastores created by Morpheus.
 
 ## Security
-- The plugin runs **three** commands on each host of an HVM cluster, through the Morpheus agent – **as root**:
+- The plugin runs **four** commands on each host of an HVM cluster, through the Morpheus agent – **as root**:
   - `hvmcli storage multipath status --json`
   - `findmnt --list --json --output SOURCE,TARGET,FSTYPE,MAJ:MIN`
   - `grep -r --include=id --include=withdraw --exclude-dir=lock_module . /sys/fs/gfs2` (only if the host has GFS2 mounts)
+  - `hvmcli storage list --json`
 
   The commands are constants in the code (`MultipathStatus.COMMAND`, `HostMounts`); nothing from requests, settings or
   Morpheus objects is added to them. They only read.

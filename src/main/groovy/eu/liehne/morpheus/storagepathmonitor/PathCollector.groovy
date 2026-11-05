@@ -35,8 +35,8 @@ class PathCollector {
 	static final long HOST_GRACE_SECONDS = 30
 	/** Wait for interrupted workers at the end of a run */
 	static final long WORKER_GRACE_SECONDS = 5
-	/** Commands a host may need in one run: paths, mounts, withdraw state */
-	static final int COMMANDS_PER_HOST = 3
+	/** Commands a host may need in one run: paths, mounts, withdraw state, pools */
+	static final int COMMANDS_PER_HOST = 4
 
 	/** Mounts without a datastore in the last run → first run that saw them; only used by the (single) run thread */
 	private Map<OrphanKey, Instant> orphanCandidates = [:]
@@ -247,27 +247,33 @@ class PathCollector {
 		try {
 			Map<String, MultipathStatus.Device> devices =
 				MultipathStatus.parse(runner.run(hostId, MultipathStatus.COMMAND, s.commandTimeoutSeconds)).asImmutable()
-			List<Mount> mounts
+			List<Mount> mounts = null
+			String mountError = null
 			try {
 				mounts = HostMounts.parseMounts(runner.run(hostId, HostMounts.MOUNT_COMMAND, s.commandTimeoutSeconds))
 			} catch (HostCommandException | MultipathStatus.ParseException e) {
-				return HostMeasurement.success(hostId, clock.instant(), devices, null, "mount check failed: ${e.message}".toString())
+				mountError = "mount check failed: ${e.message}".toString()
 			}
-			if (!mounts) {
-				return HostMeasurement.success(hostId, clock.instant(), devices, [])
+			if (mounts) {
+				Map<String, Boolean> withdrawn = [:]
+				try {
+					withdrawn = HostMounts.parseWithdrawn(runner.run(hostId, HostMounts.WITHDRAW_COMMAND, s.commandTimeoutSeconds))
+				} catch (HostCommandException | MultipathStatus.ParseException e) {
+					mountError = "withdraw check failed: ${e.message}".toString()
+				}
+				mounts = HostMounts.withWithdrawn(mounts, withdrawn).asImmutable()
+				if (mountError == null && mounts.any { it.withdrawn == null }) {
+					mountError = 'withdraw check failed: mount not covered by the command output'
+				}
 			}
-			String withdrawError = null
-			Map<String, Boolean> withdrawn = [:]
+			Map<String, Boolean> pools = null
+			String poolError = null
 			try {
-				withdrawn = HostMounts.parseWithdrawn(runner.run(hostId, HostMounts.WITHDRAW_COMMAND, s.commandTimeoutSeconds))
+				pools = HostMounts.parsePools(runner.run(hostId, HostMounts.POOL_COMMAND, s.commandTimeoutSeconds)).asImmutable()
 			} catch (HostCommandException | MultipathStatus.ParseException e) {
-				withdrawError = "withdraw check failed: ${e.message}".toString()
+				poolError = "pool check failed: ${e.message}".toString()
 			}
-			List<Mount> checked = HostMounts.withWithdrawn(mounts, withdrawn).asImmutable()
-			if (withdrawError == null && checked.any { it.withdrawn == null }) {
-				withdrawError = 'withdraw check failed: mount not covered by the command output'
-			}
-			return HostMeasurement.success(hostId, clock.instant(), devices, checked, withdrawError)
+			return HostMeasurement.success(hostId, clock.instant(), devices, mounts, mountError, pools, poolError)
 		} catch (HostCommandException | MultipathStatus.ParseException e) {
 			return HostMeasurement.failure(hostId, clock.instant(), e.message)
 		} catch (Exception e) {
@@ -335,6 +341,24 @@ class PathCollector {
 			}
 		}
 		lines.addAll(mountChanges(host, previous?.success ? previous.mounts : null, current.mounts))
+		lines.addAll(poolChanges(host, previous?.success ? previous.pools : null, current.pools))
+		return lines
+	}
+
+	/** Pools that stopped or started; pools that are not active are only reported as a change, many hosts have some */
+	private static List<String> poolChanges(String host, Map<String, Boolean> before, Map<String, Boolean> now) {
+		if (before == null || now == null) {
+			return []
+		}
+		List<String> lines = []
+		new TreeSet<String>(now.keySet() + before.keySet()).each { String name ->
+			Boolean was = before.get(name)
+			Boolean is = now.get(name)
+			if (was != is) {
+				String state = is == null ? 'gone' : (is ? 'active' : 'inactive')
+				lines << "${host}: storage pool ${name} ${state}".toString()
+			}
+		}
 		return lines
 	}
 

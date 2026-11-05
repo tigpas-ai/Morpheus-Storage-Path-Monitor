@@ -66,6 +66,33 @@ class HostMountsSpec extends Specification {
 		output << [null, '', 'grep: no such file', '/sys/fs/gfs2/a/withdraw:maybe', '/sys/fs/gfs2/a/other:1']
 	}
 
+	def 'pool states from the host command'() {
+		expect:
+		HostMounts.parsePools('''{"errorCode":0,"messages":"","data":[
+			{"name":"a","type":"GFS2","state":"active","autostart":"yes"},
+			{"name":"b","type":"GFS2","state":"inactive","autostart":"yes"}]}''') == [a: true, b: false]
+	}
+
+	@Unroll
+	def 'pool output #output is refused'() {
+		when:
+		HostMounts.parsePools(output)
+
+		then:
+		MultipathStatus.ParseException e = thrown()
+		e.message == message
+
+		where:
+		output                            || message
+		null                              || 'empty command output'
+		'garbage'                         || 'command output is not valid JSON'
+		'[]'                              || 'unexpected command output'
+		'{"errorCode":1,"data":[]}'       || 'command reported an error'
+		'{"errorCode":0}'                 || 'unexpected command output'
+		'{"data":[{"name":"a"}]}'         || 'unexpected command output'
+		'{"data":["a"]}'                  || 'unexpected command output'
+	}
+
 	def 'a mount the flags do not cover stays unknown'() {
 		expect:
 		HostMounts.withWithdrawn([new Mount('a', '/a', '1:1', null), new Mount('b', '/b', '1:2', null)], ['1:1': true]) ==

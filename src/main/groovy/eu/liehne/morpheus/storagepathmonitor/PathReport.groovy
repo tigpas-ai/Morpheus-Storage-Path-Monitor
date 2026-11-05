@@ -68,6 +68,7 @@ class PathReport {
 			Integer total = null
 			Boolean mounted = null
 			Boolean withdrawn = null
+			Boolean poolActive = null
 			if (m == null || !m.success) {
 				state = PathState.UNKNOWN
 			} else {
@@ -77,7 +78,9 @@ class PathReport {
 				List<Mount> mounts = m.mounts?.findAll { it.device == ds.device }
 				mounted = m.mounts == null ? null : !mounts.isEmpty()
 				withdrawn = mounted ? withdrawnOf(mounts) : (mounted == null ? null : Boolean.FALSE)
-				state = PathState.worst([stateOf(device, expected), mountState(mounted, withdrawn, expectMounted)])
+				poolActive = m.pools == null ? null : m.pools.get(ds.pool) == Boolean.TRUE
+				state = PathState.worst([stateOf(device, expected), mountState(mounted, withdrawn, expectMounted),
+										 poolState(poolActive, expectMounted)])
 			}
 			states << state
 			counts[state.code] = counts[state.code] + 1
@@ -90,8 +93,10 @@ class PathReport {
 				expectedPaths: m?.success ? expected : null,
 				mounted    : mounted,
 				withdrawn  : withdrawn,
+				poolActive : poolActive,
 				measuredAt : iso(m?.measuredAt),
-				error      : m?.error ?: (mounted == null || withdrawn == null ? m?.mountError : null)
+				error      : m?.error ?: (mounted == null || withdrawn == null ? m?.mountError : null) ?:
+					(poolActive == null ? m?.poolError : null)
 			] as Map<String, Object>
 		}
 		return [
@@ -149,6 +154,14 @@ class PathReport {
 			return PathState.UNKNOWN
 		}
 		return withdrawn ? PathState.DOWN : PathState.OK
+	}
+
+	/** A pool that is inactive or missing: libvirt cannot use the datastore on this host, even with the mount in place */
+	static PathState poolState(Boolean poolActive, boolean expectMounted) {
+		if (poolActive == null) {
+			return PathState.UNKNOWN
+		}
+		return poolActive || !expectMounted ? PathState.OK : PathState.DOWN
 	}
 
 	private static String iso(Instant instant) {

@@ -27,6 +27,9 @@ class PathCollectorSpec extends Specification {
 		if (command == MultipathStatus.COMMAND) {
 			return OK_OUTPUT
 		}
+		if (command == HostMounts.POOL_COMMAND) {
+			return '{"errorCode":0,"data":[]}'
+		}
 		int number = 0
 		if (command == HostMounts.MOUNT_COMMAND) {
 			return JsonOutput.toJson([filesystems: mounts.collect { device, target ->
@@ -50,6 +53,7 @@ class PathCollectorSpec extends Specification {
 		then:
 		1 * runner.run(11L, MultipathStatus.COMMAND, 30) >> OK_OUTPUT
 		1 * runner.run(11L, HostMounts.MOUNT_COMMAND, 30) >> '{"filesystems":[]}'
+		1 * runner.run(11L, HostMounts.POOL_COMMAND, 30) >> '{"errorCode":0,"data":[{"name":"p","state":"active"}]}'
 		1 * runner.run(12L, MultipathStatus.COMMAND, 30) >> { throw new HostCommandException('command failed with exit code 127') }
 		1 * runner.run(13L, MultipathStatus.COMMAND, 30) >> 'garbage'
 		0 * runner._
@@ -58,6 +62,7 @@ class PathCollectorSpec extends Specification {
 		s.measurements[11L].success
 		s.measurements[11L].devices == [lun1: new MultipathStatus.Device(2, 2)]
 		s.measurements[11L].mounts == []
+		s.measurements[11L].pools == [p: true]
 		s.measurements[12L].error == 'command failed with exit code 127'
 		s.measurements[13L].error == 'command output is not valid JSON'
 	}
@@ -71,6 +76,9 @@ class PathCollectorSpec extends Specification {
 		runner.run(12L, HostMounts.MOUNT_COMMAND, _) >> { throw new HostCommandException('no answer within 30 s') }
 		runner.run(13L, HostMounts.MOUNT_COMMAND, _) >> answer(HostMounts.MOUNT_COMMAND, [lun1: '/mnt/a'])
 		runner.run(13L, HostMounts.WITHDRAW_COMMAND, _) >> { throw new HostCommandException('command failed on the host') }
+		runner.run(11L, HostMounts.POOL_COMMAND, _) >> { throw new HostCommandException('no answer within 30 s') }
+		runner.run(12L, HostMounts.POOL_COMMAND, _) >> answer(HostMounts.POOL_COMMAND)
+		runner.run(13L, HostMounts.POOL_COMMAND, _) >> answer(HostMounts.POOL_COMMAND)
 
 		when:
 		collector.runOnce(MonitorSettings.DEFAULTS)
@@ -79,6 +87,9 @@ class PathCollectorSpec extends Specification {
 		then:
 		m[11L].mounts == [new Mount('lun1', '/mnt/a', '252:0', true)]
 		m[11L].mountError == null
+		m[11L].pools == null
+		m[11L].poolError == 'pool check failed: no answer within 30 s'
+		m[12L].pools == [:]
 		m[12L].success
 		m[12L].mounts == null
 		m[12L].mountError == 'mount check failed: no answer within 30 s'
@@ -92,6 +103,7 @@ class PathCollectorSpec extends Specification {
 		runner.run(11L, MultipathStatus.COMMAND, _) >> OK_OUTPUT
 		runner.run(11L, HostMounts.MOUNT_COMMAND, _) >> answer(HostMounts.MOUNT_COMMAND, [lun1: '/mnt/a'])
 		runner.run(11L, HostMounts.WITHDRAW_COMMAND, _) >> '/sys/fs/gfs2/c:f/id:9:9\n/sys/fs/gfs2/c:f/withdraw:0'
+		runner.run(11L, HostMounts.POOL_COMMAND, _) >> answer(HostMounts.POOL_COMMAND)
 
 		when:
 		collector.runOnce(MonitorSettings.DEFAULTS)
@@ -360,6 +372,7 @@ class PathCollectorSpec extends Specification {
 		inventory.monitoredClusters() >> [(7L): [new HostRef(11L, 'a')]]
 		runner.run(11L, MultipathStatus.COMMAND, _) >>> [OK_OUTPUT] >> { throw new StackOverflowError() }
 		runner.run(11L, HostMounts.MOUNT_COMMAND, _) >> answer(HostMounts.MOUNT_COMMAND)
+		runner.run(11L, HostMounts.POOL_COMMAND, _) >> answer(HostMounts.POOL_COMMAND)
 
 		when:
 		collector.runOnce(MonitorSettings.DEFAULTS)
@@ -386,6 +399,20 @@ class PathCollectorSpec extends Specification {
 		PathCollector.changes(ok, failed) == ['host 5: measurement failed: no answer within 30 s']
 		PathCollector.changes(failed, failed) == []
 		PathCollector.changes(failed, ok) == ['host 5: measurement works again']
+	}
+
+	def 'pool changes are reported once'() {
+		given:
+		Instant t = CLOCK.instant()
+		def with = { Map<String, Boolean> pools -> HostMeasurement.success(5L, t, [:], [], null, pools) }
+
+		expect:
+		PathCollector.changes(null, with([a: false])) == []
+		PathCollector.changes(with([a: true]), with([a: true])) == []
+		PathCollector.changes(with([a: true]), with([a: false])) == ['host 5: storage pool a inactive']
+		PathCollector.changes(with([a: false]), with([a: true])) == ['host 5: storage pool a active']
+		PathCollector.changes(with([a: true]), with([:])) == ['host 5: storage pool a gone']
+		PathCollector.changes(with([a: true]), HostMeasurement.success(5L, t, [:], [], null, null, 'pool check failed: x')) == []
 	}
 
 	def 'mount changes are reported once'() {

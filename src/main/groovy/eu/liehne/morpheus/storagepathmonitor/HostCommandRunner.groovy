@@ -23,8 +23,9 @@ class HostCommandException extends RuntimeException {
 
 /**
  * Runs a command through the Morpheus agent of the host ({@code executeCommandOnServer}); the agent runs it as root.
- * Callers only pass the constants {@link MultipathStatus#COMMAND}, {@link HostMounts#MOUNT_COMMAND} and
- * {@link HostMounts#WITHDRAW_COMMAND}; nothing from a request or setting is added to them.
+ * Callers only pass the constants {@link MultipathStatus#COMMAND}, {@link HostMounts#MOUNT_COMMAND},
+ * {@link HostMounts#WITHDRAW_COMMAND} and {@link HostMounts#POOL_COMMAND}; nothing from a request or setting is added
+ * to them.
  */
 @Slf4j
 class AgentCommandRunner implements HostCommandRunner {

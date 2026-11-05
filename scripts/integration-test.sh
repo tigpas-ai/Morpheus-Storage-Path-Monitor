@@ -425,7 +425,8 @@ CONTRACT_JQ='
               and (if .activePaths == null then .state == "unknown" else
                     (.activePaths | type) == "number" and .activePaths <= .totalPaths and .totalPaths <= .expectedPaths end)
               and (.mounted | type | IN("boolean", "null")) and (.withdrawn | type | IN("boolean", "null"))
-              and (if .mounted == null or .withdrawn == null then .state != "ok" else true end)
+              and (.poolActive | type | IN("boolean", "null"))
+              and (if .mounted == null or .withdrawn == null or .poolActive == null then .state != "ok" else true end)
               and (if .withdrawn == true then .state == "down" else true end)))'
 
 for cid in $CLUSTERS; do

@@ -22,6 +22,11 @@ class HostMounts {
 	 */
 	static final String WITHDRAW_COMMAND = 'grep -r --include=id --include=withdraw --exclude-dir=lock_module . /sys/fs/gfs2'
 
+	/** The libvirt storage pools of the host with their state; part of every HVM host */
+	static final String POOL_COMMAND = 'hvmcli storage list --json'
+
+	static final String POOL_ACTIVE = 'active'
+
 	static final String FILESYSTEM_TYPE = 'gfs2'
 
 	private static final String SYSFS_LINE = '^/sys/fs/gfs2/[^/]+/(id|withdraw):(.*)$'
@@ -108,6 +113,47 @@ class HostMounts {
 			}
 		}
 		return result
+	}
+
+	/**
+	 * Pool name → active, from the output of {@link #POOL_COMMAND}.
+	 * @throws MultipathStatus.ParseException if the output is not the expected JSON or the command reported an error
+	 */
+	static Map<String, Boolean> parsePools(String output) {
+		if (output == null || output.trim().isEmpty()) {
+			throw new MultipathStatus.ParseException('empty command output')
+		}
+		if (output.length() > MultipathStatus.MAX_OUTPUT_CHARS) {
+			throw new MultipathStatus.ParseException('command output too large')
+		}
+		Object json
+		try {
+			json = new JsonSlurper().parseText(output)
+		} catch (Exception ignored) {
+			throw new MultipathStatus.ParseException('command output is not valid JSON')
+		}
+		if (!(json instanceof Map)) {
+			throw new MultipathStatus.ParseException('unexpected command output')
+		}
+		Map root = (Map) json
+		Object errorCode = root.get('errorCode')
+		if (errorCode != null && errorCode != 0) {
+			throw new MultipathStatus.ParseException('command reported an error')
+		}
+		Object data = root.get('data')
+		if (!(data instanceof List)) {
+			throw new MultipathStatus.ParseException('unexpected command output')
+		}
+		Map<String, Boolean> pools = [:]
+		for (Object entry : (List) data) {
+			String name = entry instanceof Map ? ((Map) entry).get('name')?.toString() : null
+			String state = entry instanceof Map ? ((Map) entry).get('state')?.toString() : null
+			if (!name || !state) {
+				throw new MultipathStatus.ParseException('unexpected command output')
+			}
+			pools.put(name, state == POOL_ACTIVE)
+		}
+		return pools
 	}
 
 	/** The mounts with their withdraw state; a mount the flags do not cover stays {@code null} (unknown) */

@@ -26,12 +26,15 @@ class SharedDatastore {
 	final String device
 	/** {@code false} while Morpheus is creating or removing it: a missing mount is expected then */
 	final boolean provisioned
+	/** Name of its libvirt storage pool on the hosts */
+	final String pool
 
-	SharedDatastore(Long id, String name, String device, boolean provisioned = true) {
+	SharedDatastore(Long id, String name, String device, boolean provisioned = true, String pool = null) {
 		this.id = id
 		this.name = name
 		this.device = device
 		this.provisioned = provisioned
+		this.pool = pool ?: name
 	}
 }
 
@@ -84,7 +87,8 @@ class OrphanKey {
 /**
  * Result of the commands on one host: either the devices (success) or an error message that is safe to show.
  * {@code measuredAt} is the time the commands finished or failed. The mounts are a separate check: {@code mounts} is
- * {@code null} and {@code mountError} set if it failed, while the devices stay valid.
+ * {@code null} and {@code mountError} set if it failed, while the devices stay valid. The same goes for the libvirt
+ * storage pools ({@code pools}: name → active) and {@code poolError}.
  */
 @CompileStatic
 @Immutable(knownImmutableClasses = [Instant])
@@ -95,18 +99,21 @@ class HostMeasurement {
 	String error
 	List<Mount> mounts
 	String mountError
+	Map<String, Boolean> pools
+	String poolError
 
 	boolean isSuccess() {
 		return error == null && devices != null
 	}
 
 	static HostMeasurement success(Long hostId, Instant at, Map<String, MultipathStatus.Device> devices,
-								   List<Mount> mounts = null, String mountError = null) {
-		new HostMeasurement(hostId, at, devices, null, mounts, mountError)
+								   List<Mount> mounts = null, String mountError = null,
+								   Map<String, Boolean> pools = null, String poolError = null) {
+		new HostMeasurement(hostId, at, devices, null, mounts, mountError, pools, poolError)
 	}
 
 	static HostMeasurement failure(Long hostId, Instant at, String error) {
-		new HostMeasurement(hostId, at, null, error, null, null)
+		new HostMeasurement(hostId, at, null, error, null, null, null, null)
 	}
 }
 

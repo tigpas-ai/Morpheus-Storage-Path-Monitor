@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.0 – 2026-11-05
+- Storage pool check per datastore and host: new field `hosts[].poolActive`. A libvirt pool that is inactive or missing
+  makes the host `down`, even with the file system mounted; a failed check makes it `unknown`. One more fixed read-only
+  command per host (`hvmcli storage list --json`).
+
 ## 0.4.0 – 2026-11-05
 - Mount check per datastore and host: new fields `hosts[].mounted` and `hosts[].withdrawn`. A datastore that is not
   mounted on a host, or whose GFS2 file system was withdrawn there, makes the host `down` even if all paths are active;

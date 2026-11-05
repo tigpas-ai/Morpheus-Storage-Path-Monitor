@@ -96,7 +96,10 @@
 			if (!host.mounted) {
 				return 'not mounted';
 			}
-			return host.withdrawn ? 'withdrawn' : 'mounted';
+			if (host.withdrawn) {
+				return 'withdrawn';
+			}
+			return host.poolActive === false ? 'mounted, pool inactive' : 'mounted';
 		}
 
 		function withdrawnText(value) {

@@ -32,8 +32,8 @@ class PathsControllerSpec extends Specification {
 	Snapshot snapshot = new Snapshot(
 		[(7L): [new HostRef(11L, 'host-a'), new HostRef(12L, 'host-b'), new HostRef(13L, 'host-c')]],
 		[(11L): HostMeasurement.success(11L, T1, ['lun1': new MultipathStatus.Device(2, 2), 'lun2': new MultipathStatus.Device(2, 1)],
-			[new Mount('lun1', '/mnt/1', '1:1', false), new Mount('lun2', '/mnt/2', '1:2', false)]),
-		 (12L): HostMeasurement.success(12L, T2, ['lun1': new MultipathStatus.Device(2, 2)], [new Mount('lun1', '/mnt/1', '1:1', false)]),
+			[new Mount('lun1', '/mnt/1', '1:1', false), new Mount('lun2', '/mnt/2', '1:2', false)], null, ['ds-1': true, 'ds-2': true]),
+		 (12L): HostMeasurement.success(12L, T2, ['lun1': new MultipathStatus.Device(2, 2)], [new Mount('lun1', '/mnt/1', '1:1', false)], null, ['ds-1': true, 'ds-2': true]),
 		 (13L): HostMeasurement.failure(13L, T2, 'no answer within 30 s')],
 		T1)
 	PathsController controller = new PathsController(null, Stub(MorpheusContext), directory,
@@ -63,13 +63,13 @@ class PathsControllerSpec extends Specification {
 			intervalSeconds: 60,
 			datastores     : [
 				[id: 21L, name: 'ds-1', state: 'unknown', counts: [ok: 2, unknown: 1, degraded: 0, down: 0], hosts: [
-					[hostId: 11L, name: 'host-a', state: 'ok', activePaths: 2, totalPaths: 2, expectedPaths: 2, mounted: true, withdrawn: false, measuredAt: '2026-01-01T10:00:00Z', error: null],
-					[hostId: 12L, name: 'host-b', state: 'ok', activePaths: 2, totalPaths: 2, expectedPaths: 2, mounted: true, withdrawn: false, measuredAt: '2026-01-01T10:00:05Z', error: null],
-					[hostId: 13L, name: 'host-c', state: 'unknown', activePaths: null, totalPaths: null, expectedPaths: null, mounted: null, withdrawn: null, measuredAt: '2026-01-01T10:00:05Z', error: 'no answer within 30 s']]],
+					[hostId: 11L, name: 'host-a', state: 'ok', activePaths: 2, totalPaths: 2, expectedPaths: 2, mounted: true, withdrawn: false, poolActive: true, measuredAt: '2026-01-01T10:00:00Z', error: null],
+					[hostId: 12L, name: 'host-b', state: 'ok', activePaths: 2, totalPaths: 2, expectedPaths: 2, mounted: true, withdrawn: false, poolActive: true, measuredAt: '2026-01-01T10:00:05Z', error: null],
+					[hostId: 13L, name: 'host-c', state: 'unknown', activePaths: null, totalPaths: null, expectedPaths: null, mounted: null, withdrawn: null, poolActive: null, measuredAt: '2026-01-01T10:00:05Z', error: 'no answer within 30 s']]],
 				[id: 22L, name: 'ds-2', state: 'down', counts: [ok: 0, unknown: 1, degraded: 1, down: 1], hosts: [
-					[hostId: 11L, name: 'host-a', state: 'degraded', activePaths: 1, totalPaths: 2, expectedPaths: 2, mounted: true, withdrawn: false, measuredAt: '2026-01-01T10:00:00Z', error: null],
-					[hostId: 12L, name: 'host-b', state: 'down', activePaths: 0, totalPaths: 0, expectedPaths: 2, mounted: false, withdrawn: false, measuredAt: '2026-01-01T10:00:05Z', error: null],
-					[hostId: 13L, name: 'host-c', state: 'unknown', activePaths: null, totalPaths: null, expectedPaths: null, mounted: null, withdrawn: null, measuredAt: '2026-01-01T10:00:05Z', error: 'no answer within 30 s']]]
+					[hostId: 11L, name: 'host-a', state: 'degraded', activePaths: 1, totalPaths: 2, expectedPaths: 2, mounted: true, withdrawn: false, poolActive: true, measuredAt: '2026-01-01T10:00:00Z', error: null],
+					[hostId: 12L, name: 'host-b', state: 'down', activePaths: 0, totalPaths: 0, expectedPaths: 2, mounted: false, withdrawn: false, poolActive: true, measuredAt: '2026-01-01T10:00:05Z', error: null],
+					[hostId: 13L, name: 'host-c', state: 'unknown', activePaths: null, totalPaths: null, expectedPaths: null, mounted: null, withdrawn: null, poolActive: null, measuredAt: '2026-01-01T10:00:05Z', error: 'no answer within 30 s']]]
 			],
 			orphanMounts   : []
 		]
@@ -81,7 +81,7 @@ class PathsControllerSpec extends Specification {
 		Map<String, MultipathStatus.Device> lun = [lun1: new MultipathStatus.Device(2, 2)]
 		directory.clusterVisible(admin, 7L) >> true
 		directory.datastores(admin, 7L) >> [new SharedDatastore(21L, 'ds-1', 'lun1', provisioned)]
-		snapshot = new Snapshot([(7L): [new HostRef(11L, 'a')]], [(11L): HostMeasurement.success(11L, T1, lun, [])], T1, [:], settled)
+		snapshot = new Snapshot([(7L): [new HostRef(11L, 'a')]], [(11L): HostMeasurement.success(11L, T1, lun, [], null, ['ds-1': false])], T1, [:], settled)
 
 		when:
 		Map host = (controller.paths(model(admin, [clusterId: '7'])).data as Map).datastores[0].hosts[0] as Map
@@ -136,6 +136,27 @@ class PathsControllerSpec extends Specification {
 		ds.hosts*.error == [null, null, 'mount check failed: no answer within 30 s', 'withdraw check failed: command failed on the host']
 	}
 
+	def 'mounted, but the pool is inactive, missing or could not be read'() {
+		given:
+		Map<String, MultipathStatus.Device> lun = [lun1: new MultipathStatus.Device(2, 2)]
+		List<Mount> mounted = [new Mount('lun1', '/mnt/1', '1:1', false)]
+		snapshot = new Snapshot([(7L): [new HostRef(11L, 'a'), new HostRef(12L, 'b'), new HostRef(13L, 'c'), new HostRef(14L, 'd')]],
+			[(11L): HostMeasurement.success(11L, T1, lun, mounted, null, [pool1: true]),
+			 (12L): HostMeasurement.success(12L, T1, lun, mounted, null, [pool1: false]),
+			 (13L): HostMeasurement.success(13L, T1, lun, mounted, null, [other: true]),
+			 (14L): HostMeasurement.success(14L, T1, lun, mounted, null, null, 'pool check failed: no answer within 30 s')], T1)
+		directory.clusterVisible(admin, 7L) >> true
+		directory.datastores(admin, 7L) >> [new SharedDatastore(21L, 'ds-1', 'lun1', true, 'pool1')]
+
+		when:
+		Map ds = (controller.paths(model(admin, [clusterId: '7'])).data as Map).datastores[0] as Map
+
+		then:
+		ds.hosts*.state == ['ok', 'down', 'down', 'unknown']
+		ds.hosts*.poolActive == [true, false, false, null]
+		ds.hosts*.error == [null, null, null, 'pool check failed: no answer within 30 s']
+	}
+
 	def 'orphan mounts raise the cluster to degraded; details only for users who may see hosts'() {
 		given:
 		snapshot = new Snapshot([(7L): [new HostRef(11L, 'host-a')]], [:], T1,
@@ -156,9 +177,9 @@ class PathsControllerSpec extends Specification {
 		given:
 		List<Mount> mounted = [new Mount('lun1', '/mnt/1', '1:1', false)]
 		snapshot = new Snapshot([(7L): [new HostRef(11L, 'a'), new HostRef(12L, 'b'), new HostRef(13L, 'c')]],
-			[(11L): HostMeasurement.success(11L, T1, [lun1: new MultipathStatus.Device(2, 2)], mounted),
-			 (12L): HostMeasurement.success(12L, T1, [lun1: new MultipathStatus.Device(1, 1)], mounted),
-			 (13L): HostMeasurement.success(13L, T1, [lun1: new MultipathStatus.Device(2, 2)], mounted)], T1)
+			[(11L): HostMeasurement.success(11L, T1, [lun1: new MultipathStatus.Device(2, 2)], mounted, null, ['ds-1': true]),
+			 (12L): HostMeasurement.success(12L, T1, [lun1: new MultipathStatus.Device(1, 1)], mounted, null, ['ds-1': true]),
+			 (13L): HostMeasurement.success(13L, T1, [lun1: new MultipathStatus.Device(2, 2)], mounted, null, ['ds-1': true])], T1)
 		directory.clusterVisible(admin, 7L) >> true
 		directory.datastores(admin, 7L) >> [new SharedDatastore(21L, 'ds-1', 'lun1')]
 
