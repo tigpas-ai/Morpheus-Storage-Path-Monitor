@@ -19,6 +19,12 @@ the first path of each LUN, although a host typically has several.
 5. **Test** of `degraded`/`down` with a really disconnected path – only after explicit approval, one path always stays
    active.
 
+6. **Mount check per datastore and host (0.4.0):** whether the file system of the datastore is really mounted and not
+   withdrawn. A datastore that cannot be used on a host counts as `down` there, whatever its paths say.
+7. **Mounts without a datastore (0.4.0):** a GFS2 mount that stays on a host after the datastore was removed from
+   Morpheus must be visible on the status page. The documentation describes the cause: if unmounting fails while a
+   datastore is removed, Morpheus logs a warning and continues (docs 9.1.0 p. 2410).
+
 ## Design decisions
 | Topic | Decision | Reason |
 |---|---|---|
@@ -32,6 +38,16 @@ the first path of each LUN, although a host typically has several.
 | Failed measurement | state `unknown` with `error`, counters `null` | Old counters would look current |
 | Error texts | fixed English texts, never command output | Output may contain host details |
 | Log | warning on each state change per host/device (first measurement: only devices that are not ok) | Visible in the Morpheus log without a consumer |
+| Mount command | `findmnt --list --json --output SOURCE,TARGET,FSTYPE,MAJ:MIN`, GFS2 selected by the parser | Reads the kernel table only, so it also answers on a hanging file system. With `-t gfs2`, findmnt ends with exit code 1 if nothing matches, which looks like a failure. `--list` gives a flat list instead of a tree |
+| Withdraw command | `grep -r --include=id --include=withdraw --exclude-dir=lock_module . /sys/fs/gfs2`, only if the host has GFS2 mounts | One call for all file systems, no shell glob. `id` is `major:minor`, the link to the mount. `lock_module/withdraw` is write-only and would make grep end with exit code 2; the directory is missing without GFS2 mounts |
+| Failed mount check | `unknown` with the reason in `error`, paths stay valid | The paths were measured; the datastore state on the host is not known |
+| Not mounted, withdrawn | `down`, also on cluster level; no separate state | Consumers that only read `state` see it at once; a new state value would count as `unknown` for them |
+| Datastore being created or removed | status `provisioning` etc., and until a complete run started after that: a missing mount does not lower the state | Expected then, and a measurement from before the mount must not count. `warning` is deliberately not exempt: Morpheus sets it when the mount is missing on a host, also after a failure |
+| Mount ↔ datastore | device (`config.blockDevice`) or mount point (`externalPath`) of any datastore of the cluster, system scope | With the user's scope, datastores the user may not see would look orphaned. Two characteristics, so a differently written device path does not cause a false report |
+| Orphan after two runs | compared at the end of a run with a fresh query; reported if the previous run already found it | A datastore being created can be mounted before Morpheus has saved it. Hosts not measured in a run, or a failed query, keep what was known |
+| Orphans raise the cluster to `degraded` | not `down` | The datastores in Morpheus work; the leftover needs attention but does not stop anything |
+| All HVM clusters are collected | also without a shared-LUN datastore | Otherwise a cluster would drop out exactly when its last datastore was removed and its mount stayed behind |
+| Device and mount point of orphans | only with Compute read permission | Details of the host, same rule as host names |
 
 ## Detail page (0.3.0)
 Requirement: a detail page in the Morpheus UI, so the plugin can be used on its own, ideally as fourth entry under
@@ -77,6 +93,22 @@ Requirement: a detail page in the Morpheus UI, so the plugin can be used on its 
   (downgrade, e.g. 0.3.0 → 0.2.0); an upload keeps the plugin id and the settings (`config`), but **enables** a
   disabled plugin. `PUT /api/plugins/:id` with `config` replaces the whole settings object. `DELETE /api/plugins/:id`
   removes the plugin (assets and route answer `404` afterwards); a new installation gets a new id and empty settings.
+
+## Mount findings (test appliance, one test datastore on a free LUN, three hosts, 0.4.0)
+- Mount points can differ per host: the host that formats a new datastore mounts on the path saved as `externalPath`,
+  the others on another `/mnt/<uuid>`. So the device is the reliable link; `externalPath` is only a second characteristic.
+  `externalPath` is still empty while the datastore is `provisioning`.
+- A new datastore: status `provisioning` for about 2.5 min with no mount, then `provisioned` and `warning`
+  ("Check host(s) … status"). The first host is mounted by then, the others 3–4 min later. The status stayed `warning`
+  for at least 20 min although all hosts had the mount, and the libvirt pool of the other hosts stayed `inactive`.
+- Unmount on one host (`umount`): `down` with `mounted: false` after one run, `ok` again after mounting. Morpheus did not
+  mount it again by itself within 2.5 min.
+- The reported fault, reproduced: the mount on one host held busy, datastore removed through the API. Morpheus removed the
+  datastore within 30 s, unmounted on the other hosts and left the busy mount in place. The plugin listed it in
+  `orphanMounts` about 2 min after the removal; the entry went away with the unmount.
+- Not observed: a status for removal. The datastore was gone from the API by the first look (30 s), so the values
+  `deprovisioning` and `removing` in `MorpheusQueries.STATUS_IN_PROGRESS` are a precaution, only `provisioning` is verified.
+- Not tested with a real withdraw: it can bring the host down (see test C below). Unit tests only.
 
 ## Path failure tests (test appliance, one host of three, two iSCSI portals, one target, 10 LUNs)
 | Test | What happened on the host | Plugin (interval 15 s) |

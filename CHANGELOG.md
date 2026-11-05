@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 – 2026-11-05
+- Mount check per datastore and host: new fields `hosts[].mounted` and `hosts[].withdrawn`. A datastore that is not
+  mounted on a host, or whose GFS2 file system was withdrawn there, makes the host `down` even if all paths are active;
+  a failed check makes it `unknown` with the reason in `error`. A missing mount does not count while Morpheus creates or
+  removes the datastore.
+- Mounts without a data store: new list `orphanMounts` and a section on the Multipath Status page. A GFS2 mount on a
+  host for which Morpheus has no datastore (e.g. unmounting failed while the datastore was removed) raises the cluster
+  state to `degraded` once two runs in a row found it.
+- All HVM clusters are now queried, also those without a shared-LUN datastore (a mount may stay behind when the last
+  one is removed). Two more fixed read-only commands per host, one of them only if the host has GFS2 mounts.
+- Log warnings for mounts that appear, disappear, are withdrawn or have no datastore.
 - "Multipath Status" page shows version, author, license and a link to the source code at the bottom.
 - Integration test against a live appliance (`scripts/integration-test.sh`, see `docs/integration-test.md`): installs
   the built plugin, checks status, settings, assets, route (against `CONTRACT.md`), disable/enable, permissions and

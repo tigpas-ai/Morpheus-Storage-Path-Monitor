@@ -9,8 +9,17 @@ import groovy.util.logging.Slf4j
 
 /** Inventory used by the background collection (system scope, no user) */
 interface ClusterInventory {
-	/** Cluster id → hosts, only HVM clusters with at least one shared-LUN datastore */
+	/**
+	 * Cluster id → hosts of all HVM clusters. Also clusters without a shared-LUN datastore: when the last datastore is
+	 * removed, its mount may stay behind on a host.
+	 */
 	Map<Long, List<HostRef>> monitoredClusters()
+
+	/** Cluster id → all its datastores, regardless of any user */
+	Map<Long, KnownStorage> knownStorage(Collection<Long> clusterIds)
+
+	/** Cluster id → multipath devices of its datastores that Morpheus is not creating or removing right now */
+	Map<Long, Set<String>> settledDevices(Collection<Long> clusterIds)
 }
 
 /** Objects as the signed-in user may see them */
@@ -45,7 +54,12 @@ class MorpheusQueries implements ClusterInventory, UserDirectory {
 
 	static final List<String> CLUSTER_PROPS = ['id', 'owner.id']
 	static final List<String> HOST_PROPS = ['id', 'name', 'serverGroup.id', 'parentServer.id']
-	static final List<String> DATASTORE_PROPS = ['id', 'name', 'refType', 'refId', 'config', 'owner.id']
+	static final List<String> DATASTORE_PROPS = ['id', 'name', 'refType', 'refId', 'config', 'owner.id', 'status', 'externalPath']
+	/**
+	 * Status of a datastore while Morpheus works on it. Not {@code warning}: Morpheus sets that when the mount is missing
+	 * on a host ("Check host(s) … status"), during the rollout to the other hosts as well as when it failed.
+	 */
+	static final List<String> STATUS_IN_PROGRESS = ['provisioning', 'deprovisioning', 'removing']
 
 	private final MorpheusContext morpheus
 	private final AccessPolicy accessPolicy
@@ -62,21 +76,58 @@ class MorpheusQueries implements ClusterInventory, UserDirectory {
 		if (!clusterIds) {
 			return [:]
 		}
-		DataQuery datastoreQuery = new DataQuery()
-			.withFilter('refType', DATASTORE_REF_TYPE)
-			.withFilter('refId', 'in', clusterIds)
-		Set<Long> withLun = rows(morpheus.services.cloud.datastore, datastoreQuery, DATASTORE_PROPS)
-			.findAll { it.refType == DATASTORE_REF_TYPE && deviceOf(it) != null }
-			.collect { it.refId as Long }
-			.findAll { it in clusterIds } as Set
-		if (!withLun) {
-			return [:]
-		}
-		Map<Long, List<HostRef>> result = withLun.collectEntries { [(it): []] }
-		rows(morpheus.services.computeServer, new DataQuery().withFilter('serverGroup.id', 'in', withLun as List), HOST_PROPS)
-			.findAll { it['parentServer.id'] == null && (it['serverGroup.id'] as Long) in withLun }
+		Map<Long, List<HostRef>> result = clusterIds.collectEntries { [(it): []] }
+		rows(morpheus.services.computeServer, new DataQuery().withFilter('serverGroup.id', 'in', clusterIds), HOST_PROPS)
+			.findAll { it['parentServer.id'] == null && (it['serverGroup.id'] as Long) in clusterIds }
 			.each { result[it['serverGroup.id'] as Long] << new HostRef(it.id as Long, it.name as String) }
 		return result.collectEntries { k, v -> [(k): v.sort { it.id }.asImmutable()] }
+	}
+
+	@Override
+	Map<Long, KnownStorage> knownStorage(Collection<Long> clusterIds) {
+		if (!clusterIds) {
+			return [:]
+		}
+		Map<Long, Set<String>> devices = clusterIds.collectEntries { [(it): new HashSet<String>()] }
+		Map<Long, Set<String>> mountPoints = clusterIds.collectEntries { [(it): new HashSet<String>()] }
+		DataQuery query = new DataQuery()
+			.withFilter('refType', DATASTORE_REF_TYPE)
+			.withFilter('refId', 'in', clusterIds as List)
+		rows(morpheus.services.cloud.datastore, query, DATASTORE_PROPS)
+			.findAll { it.refType == DATASTORE_REF_TYPE && devices.containsKey(it.refId as Long) }
+			.each { Map row ->
+				Long clusterId = row.refId as Long
+				String blockDevice = blockDeviceOf(row)
+				if (blockDevice) {
+					devices[clusterId] << Datastores.deviceKey(blockDevice)
+				}
+				if (row.externalPath) {
+					mountPoints[clusterId] << row.externalPath.toString()
+				}
+			}
+		return clusterIds.collectEntries { Long id ->
+			[(id): new KnownStorage(devices[id].asImmutable(), mountPoints[id].asImmutable())]
+		}
+	}
+
+	@Override
+	Map<Long, Set<String>> settledDevices(Collection<Long> clusterIds) {
+		if (!clusterIds) {
+			return [:]
+		}
+		Map<Long, Set<String>> settled = clusterIds.collectEntries { [(it): new HashSet<String>()] }
+		DataQuery query = new DataQuery()
+			.withFilter('refType', DATASTORE_REF_TYPE)
+			.withFilter('refId', 'in', clusterIds as List)
+		rows(morpheus.services.cloud.datastore, query, DATASTORE_PROPS)
+			.findAll { it.refType == DATASTORE_REF_TYPE && settled.containsKey(it.refId as Long) && !(it.status in STATUS_IN_PROGRESS) }
+			.each { Map row ->
+				String device = deviceOf(row)
+				if (device != null) {
+					settled[row.refId as Long] << device
+				}
+			}
+		return settled
 	}
 
 	@Override
@@ -110,7 +161,8 @@ class MorpheusQueries implements ClusterInventory, UserDirectory {
 			}
 			.collect { Map it ->
 				String device = deviceOf(it)
-				device == null ? null : new SharedDatastore(it.id as Long, it.name as String, device)
+				device == null ? null : new SharedDatastore(it.id as Long, it.name as String, device,
+					!(it.status in STATUS_IN_PROGRESS))
 			}
 			.findAll { it != null }
 			.sort { a, b -> (a.name ?: '') <=> (b.name ?: '') ?: a.id <=> b.id }
@@ -118,6 +170,11 @@ class MorpheusQueries implements ClusterInventory, UserDirectory {
 
 	/** Multipath device of a datastore row, from {@code config.blockDevice} */
 	static String deviceOf(Map row) {
+		return Datastores.deviceName(blockDeviceOf(row))
+	}
+
+	/** Setting {@code blockDevice} of a datastore row, in whatever form it has */
+	private static String blockDeviceOf(Map row) {
 		Object config = row.config
 		Map map = null
 		if (config instanceof Map) {
@@ -130,7 +187,7 @@ class MorpheusQueries implements ClusterInventory, UserDirectory {
 				map = null
 			}
 		}
-		return Datastores.deviceName(map?.blockDevice?.toString())
+		return map?.blockDevice?.toString()
 	}
 
 	private static List<Map> rows(service, DataQuery query, List<String> properties) {

@@ -8,10 +8,10 @@ import groovy.util.logging.Slf4j
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
-/** Runs the fixed status command on one host and returns its output */
+/** Runs one of the fixed commands on one host and returns its output */
 interface HostCommandRunner {
 	/** @throws HostCommandException with a message that is safe to show */
-	String run(Long hostId, int timeoutSeconds)
+	String run(Long hostId, String command, int timeoutSeconds)
 }
 
 /** Failure of a host command; the message never contains command output */
@@ -22,8 +22,9 @@ class HostCommandException extends RuntimeException {
 }
 
 /**
- * Runs {@link MultipathStatus#COMMAND} through the Morpheus agent of the host ({@code executeCommandOnServer}); the
- * agent runs it as root. The command is a constant, nothing from a request or setting is added to it.
+ * Runs a command through the Morpheus agent of the host ({@code executeCommandOnServer}); the agent runs it as root.
+ * Callers only pass the constants {@link MultipathStatus#COMMAND}, {@link HostMounts#MOUNT_COMMAND} and
+ * {@link HostMounts#WITHDRAW_COMMAND}; nothing from a request or setting is added to them.
  */
 @Slf4j
 class AgentCommandRunner implements HostCommandRunner {
@@ -35,14 +36,14 @@ class AgentCommandRunner implements HostCommandRunner {
 	}
 
 	@Override
-	String run(Long hostId, int timeoutSeconds) {
+	String run(Long hostId, String command, int timeoutSeconds) {
 		ComputeServer server = morpheus.services.computeServer.get(hostId)
 		if (server == null) {
 			throw new HostCommandException('host not found')
 		}
 		TaskResult result
 		try {
-			result = morpheus.executeCommandOnServer(server, MultipathStatus.COMMAND)
+			result = morpheus.executeCommandOnServer(server, command)
 				.timeout(timeoutSeconds, TimeUnit.SECONDS)
 				.blockingGet()
 		} catch (Exception e) {

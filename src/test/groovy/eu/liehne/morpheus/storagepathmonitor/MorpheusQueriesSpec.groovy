@@ -78,20 +78,66 @@ class MorpheusQueriesSpec extends Specification {
 		queries.datastores(tenantUser, 7L) == [new SharedDatastore(2L, 'a-shared', '3def'), new SharedDatastore(1L, 'b-shared', '3abc')]
 	}
 
-	def 'monitored clusters: HVM clusters with a shared LUN and their hosts without parent'() {
+	def 'a datastore Morpheus has not finished is not provisioned'() {
 		given:
-		clusters.listOptions(_) >> [[id: 7L, 'owner.id': 1L], [id: 8L, 'owner.id': 1L], [id: 9L, 'owner.id': 1L]]
 		datastoreService.listOptions(_) >> [
-			[id: 1L, refType: 'ComputeServerGroup', refId: 7L, config: LUN],
-			[id: 2L, refType: 'ComputeServerGroup', refId: 8L, config: '{"path":"/var/lib"}'],
-			[id: 3L, refType: 'ComputeServerGroup', refId: 99L, config: LUN]]
+			[id: 1L, name: 'a', refType: 'ComputeServerGroup', refId: 7L, config: LUN, 'owner.id': 5L, status: 'provisioned'],
+			[id: 2L, name: 'b', refType: 'ComputeServerGroup', refId: 7L, config: LUN, 'owner.id': 5L, status: 'provisioning'],
+			[id: 3L, name: 'c', refType: 'ComputeServerGroup', refId: 7L, config: LUN, 'owner.id': 5L, status: 'warning']]
+
+		expect:
+		queries.datastores(tenantUser, 7L)*.provisioned == [true, false, true]
+	}
+
+	def 'settled devices: multipath datastores of the cluster that Morpheus is not working on'() {
+		given:
+		datastoreService.listOptions(_) >> [
+			[id: 1L, refType: 'ComputeServerGroup', refId: 7L, config: LUN, status: 'provisioned'],
+			[id: 2L, refType: 'ComputeServerGroup', refId: 7L, config: '{"blockDevice":"/dev/mapper/3new"}', status: 'provisioning'],
+			[id: 3L, refType: 'ComputeServerGroup', refId: 7L, config: '{"blockDevice":"/dev/mapper/3warn"}', status: 'warning'],
+			[id: 4L, refType: 'ComputeServerGroup', refId: 7L, config: '{"path":"/var/lib"}', status: 'provisioned']]
+
+		expect:
+		queries.settledDevices([7L, 9L]) == [(7L): ['3abc', '3warn'] as Set, (9L): [] as Set]
+		queries.settledDevices([]) == [:]
+	}
+
+	def 'monitored clusters: all HVM clusters, also without a shared LUN, and their hosts without parent'() {
+		given:
+		clusters.listOptions(_) >> [[id: 7L, 'owner.id': 1L], [id: 8L, 'owner.id': 1L]]
 		servers.listOptions(_) >> [
 			[id: 12L, name: 'h2', 'serverGroup.id': 7L, 'parentServer.id': null],
 			[id: 11L, name: 'h1', 'serverGroup.id': 7L, 'parentServer.id': null],
 			[id: 20L, name: 'vm', 'serverGroup.id': 7L, 'parentServer.id': 11L]]
 
-		expect:
-		queries.monitoredClusters() == [(7L): [new HostRef(11L, 'h1'), new HostRef(12L, 'h2')]]
+		when:
+		Map result = queries.monitoredClusters()
+
+		then:
+		0 * datastoreService.listOptions(_)
+		result == [(7L): [new HostRef(11L, 'h1'), new HostRef(12L, 'h2')], (8L): []]
+	}
+
+	def 'known storage: device and mount point of every datastore of the cluster, without user scope'() {
+		given:
+		DataQuery seen = null
+		datastoreService.listOptions(_) >> { DataQuery q ->
+			seen = q
+			[[id: 1L, refType: 'ComputeServerGroup', refId: 7L, config: LUN, externalPath: '/mnt/a', 'owner.id': 99L],
+			 [id: 2L, refType: 'ComputeServerGroup', refId: 7L, config: '{"blockDevice":"/dev/sdx"}'],
+			 [id: 3L, refType: 'ComputeServerGroup', refId: 7L, config: '{"path":"/var/lib"}', externalPath: '/mnt/c'],
+			 [id: 4L, refType: 'ComputeServerGroup', refId: 8L, config: '{"blockDevice":"/dev/mapper/3other"}'],
+			 [id: 5L, refType: 'ComputeZone', refId: 7L, config: '{"blockDevice":"/dev/mapper/3zone"}']]
+		}
+
+		when:
+		Map<Long, KnownStorage> known = queries.knownStorage([7L, 9L])
+
+		then:
+		seen.user == null
+		known[7L].devices == ['3abc', '/dev/sdx'] as Set
+		known[7L].mountPoints == ['/mnt/a', '/mnt/c'] as Set
+		known[9L].devices.isEmpty()
 	}
 
 	def 'no HVM cluster, no further queries'() {

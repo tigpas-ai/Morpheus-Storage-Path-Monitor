@@ -20,24 +20,44 @@ class PathReport {
 									 MonitorSettings settings, boolean withHostNames, boolean withHosts = true) {
 		List<HostRef> hosts = snapshot.hostsByCluster.get(clusterId) ?: []
 		List<Map<String, Object>> entries = datastores.collect { SharedDatastore ds ->
-			Map<String, Object> entry = datastoreEntry(ds, hosts, snapshot.measurements, withHostNames)
+			Set<String> settled = snapshot.settledByCluster?.get(clusterId)
+			boolean expectMounted = ds.provisioned && (snapshot.settledByCluster == null || settled?.contains(ds.device))
+			Map<String, Object> entry = datastoreEntry(ds, hosts, snapshot.measurements, withHostNames, expectMounted)
 			if (!withHosts) {
 				entry.remove('hosts')
 			}
 			entry
 		}
 		List<PathState> states = entries.collect { PathState.valueOf(((String) it.state).toUpperCase()) }
+		List<OrphanMount> orphans = snapshot.orphansByCluster?.get(clusterId) ?: []
+		if (orphans) {
+			states << PathState.DEGRADED
+		}
 		return [
 			clusterId      : clusterId,
-			state          : entries ? PathState.worst(states).code : null,
+			state          : states ? PathState.worst(states).code : null,
 			lastRunAt      : iso(snapshot.lastRunAt),
 			intervalSeconds: settings.intervalSeconds,
-			datastores     : entries
+			datastores     : entries,
+			orphanMounts   : orphans.collect { orphanEntry(it, hosts, withHostNames) }
+		] as Map<String, Object>
+	}
+
+	/** Device and mount point are details of the host: like its name, only for users who may see hosts */
+	private static Map<String, Object> orphanEntry(OrphanMount orphan, List<HostRef> hosts, boolean withHostNames) {
+		return [
+			hostId    : orphan.hostId,
+			name      : withHostNames ? hosts.find { it.id == orphan.hostId }?.name : null,
+			device    : withHostNames ? orphan.device : null,
+			mountPoint: withHostNames ? orphan.mountPoint : null,
+			withdrawn : orphan.withdrawn,
+			since     : iso(orphan.since)
 		] as Map<String, Object>
 	}
 
 	private static Map<String, Object> datastoreEntry(SharedDatastore ds, List<HostRef> hosts,
-													  Map<Long, HostMeasurement> measurements, boolean withHostNames) {
+													  Map<Long, HostMeasurement> measurements, boolean withHostNames,
+													  boolean expectMounted) {
 		Map<String, Integer> counts = PathState.values().collectEntries { [(it.code): 0] } as Map<String, Integer>
 		List<PathState> states = []
 		int expected = expectedPaths(ds, hosts, measurements)
@@ -46,13 +66,18 @@ class PathReport {
 			PathState state
 			Integer active = null
 			Integer total = null
+			Boolean mounted = null
+			Boolean withdrawn = null
 			if (m == null || !m.success) {
 				state = PathState.UNKNOWN
 			} else {
 				MultipathStatus.Device device = m.devices.get(ds.device)
-				state = stateOf(device, expected)
 				active = device?.active ?: 0
 				total = device?.paths ?: 0
+				List<Mount> mounts = m.mounts?.findAll { it.device == ds.device }
+				mounted = m.mounts == null ? null : !mounts.isEmpty()
+				withdrawn = mounted ? withdrawnOf(mounts) : (mounted == null ? null : Boolean.FALSE)
+				state = PathState.worst([stateOf(device, expected), mountState(mounted, withdrawn, expectMounted)])
 			}
 			states << state
 			counts[state.code] = counts[state.code] + 1
@@ -63,8 +88,10 @@ class PathReport {
 				activePaths  : active,
 				totalPaths   : total,
 				expectedPaths: m?.success ? expected : null,
+				mounted    : mounted,
+				withdrawn  : withdrawn,
 				measuredAt : iso(m?.measuredAt),
-				error      : m?.error
+				error      : m?.error ?: (mounted == null || withdrawn == null ? m?.mountError : null)
 			] as Map<String, Object>
 		}
 		return [
@@ -97,6 +124,31 @@ class PathReport {
 	static PathState stateOf(MultipathStatus.Device device, int expected) {
 		PathState state = PathState.of(device)
 		return state == PathState.OK && device.paths < expected ? PathState.DEGRADED : state
+	}
+
+	/** Withdrawn if any mount of the file system is; {@code null} if that is not known for all of them */
+	private static Boolean withdrawnOf(List<Mount> mounts) {
+		if (mounts.any { it.withdrawn == Boolean.TRUE }) {
+			return Boolean.TRUE
+		}
+		return mounts.any { it.withdrawn == null } ? null : Boolean.FALSE
+	}
+
+	/**
+	 * What the mount adds to the path state: not mounted or withdrawn means the datastore cannot be used on this host,
+	 * whatever the paths say. While Morpheus creates or removes the datastore, a missing mount is expected.
+	 */
+	static PathState mountState(Boolean mounted, Boolean withdrawn, boolean expectMounted) {
+		if (mounted == null) {
+			return PathState.UNKNOWN
+		}
+		if (!mounted) {
+			return expectMounted ? PathState.DOWN : PathState.OK
+		}
+		if (withdrawn == null) {
+			return PathState.UNKNOWN
+		}
+		return withdrawn ? PathState.DOWN : PathState.OK
 	}
 
 	private static String iso(Instant instant) {

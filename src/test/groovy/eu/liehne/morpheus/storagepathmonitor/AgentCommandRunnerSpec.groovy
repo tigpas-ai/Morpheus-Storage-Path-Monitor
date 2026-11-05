@@ -21,9 +21,9 @@ class AgentCommandRunnerSpec extends Specification {
 	}
 	AgentCommandRunner runner = new AgentCommandRunner(morpheus)
 
-	def 'runs exactly the fixed command and returns its output'() {
+	def 'runs exactly the given command and returns its output'() {
 		when:
-		String output = runner.run(11L, 5)
+		String output = runner.run(11L, MultipathStatus.COMMAND, 5)
 
 		then:
 		1 * morpheus.executeCommandOnServer(server, 'hvmcli storage multipath status --json') >>
@@ -37,7 +37,7 @@ class AgentCommandRunnerSpec extends Specification {
 		morpheus.executeCommandOnServer(_, _) >> Single.just(new TaskResult(success: false, exitCode: code, output: 'secret'))
 
 		when:
-		runner.run(11L, 5)
+		runner.run(11L, MultipathStatus.COMMAND, 5)
 
 		then:
 		HostCommandException e = thrown()
@@ -57,7 +57,7 @@ class AgentCommandRunnerSpec extends Specification {
 		morpheus.executeCommandOnServer(_, _) >> Single.never()
 
 		when:
-		runner.run(11L, 1)
+		runner.run(11L, MultipathStatus.COMMAND, 1)
 
 		then:
 		HostCommandException e = thrown()
@@ -69,7 +69,7 @@ class AgentCommandRunnerSpec extends Specification {
 		morpheus.executeCommandOnServer(_, _) >> Single.error(new IllegalStateException('secret'))
 
 		when:
-		runner.run(11L, 5)
+		runner.run(11L, MultipathStatus.COMMAND, 5)
 
 		then:
 		HostCommandException e = thrown()
@@ -78,7 +78,7 @@ class AgentCommandRunnerSpec extends Specification {
 
 	def 'unknown host'() {
 		when:
-		runner.run(12L, 5)
+		runner.run(12L, MultipathStatus.COMMAND, 5)
 
 		then:
 		HostCommandException e = thrown()

@@ -5,6 +5,23 @@
 		<button type="button" class="btn btn-link spm-reload">Reload</button>
 	</div>
 	<div class="spm-message" role="status">Loading path states…</div>
+	<div class="spm-orphans" hidden>
+		<h5>Mounts without a data store</h5>
+		<p>These GFS2 file systems are mounted on a host, but Morpheus has no data store for them, for example because
+			unmounting failed when the data store was removed.</p>
+		<table class="table table-condensed">
+			<thead>
+				<tr>
+					<th>Host</th>
+					<th>Device</th>
+					<th>Mount point</th>
+					<th>Withdrawn</th>
+					<th>Since</th>
+				</tr>
+			</thead>
+			<tbody></tbody>
+		</table>
+	</div>
 	<table class="table spm-table" hidden>
 		<thead>
 			<tr>
@@ -16,9 +33,10 @@
 		</thead>
 		<tbody></tbody>
 	</table>
-	<p class="spm-note">Paths per host are measured in the background (interval <span class="spm-interval">–</span> s).
-		<em>degraded</em>: not all paths active, or fewer paths than the other hosts. <em>down</em>: no path active or
-		LUN missing. <em>unknown</em>: host not measured or not reachable.</p>
+	<p class="spm-note">Paths and mounts per host are measured in the background (interval <span class="spm-interval">–</span> s).
+		<em>degraded</em>: not all paths active, or fewer paths than the other hosts; for the cluster also a mount without a
+		data store. <em>down</em>: no path active, LUN missing, not mounted or file system withdrawn. <em>unknown</em>: host
+		not measured or not reachable, or a check failed.</p>
 	<p class="spm-about">Storage Path Monitor {{version}} · Author: {{author}} · License: {{license}} ·
 		<a href="{{repositoryUrl}}" target="_blank" rel="noopener noreferrer">Source code</a></p>
 </div>

@@ -7,7 +7,7 @@ import groovy.util.logging.Slf4j
 import java.util.function.Supplier
 
 /**
- * Monitors the multipath storage paths of shared-LUN datastores on HVM hosts. Collects in the background
+ * Monitors the multipath storage paths and mounts of shared-LUN datastores on HVM hosts. Collects in the background
  * ({@link PathCollector}) and offers the result through one read-only route ({@link PathsController}).
  */
 @Slf4j
@@ -31,7 +31,7 @@ class StoragePathMonitorPlugin extends Plugin {
 		this.setAuthor(AUTHOR)
 		this.setSourceCodeLocationUrl(REPOSITORY_URL)
 		this.setIssueTrackerUrl("${REPOSITORY_URL}/issues".toString())
-		this.setDescription('Monitors the multipath storage paths of shared-LUN datastores on HVM hosts')
+		this.setDescription('Monitors the multipath storage paths and mounts of shared-LUN datastores on HVM hosts')
 		// Own renderer: with controllers, Morpheus 9.1 otherwise adds the plugin's templates to the shared renderer,
 		// which fails (UnsupportedOperationException in DynamicTemplateLoader)
 		this.setRenderer(new HandlebarsRenderer('renderer', this.classLoader))

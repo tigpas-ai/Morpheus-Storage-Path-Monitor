@@ -78,7 +78,7 @@ If restoring fails, the script exits with code 3 and prints the state before the
 *Administration → Integrations → Plugins*. An upload keeps the plugin id; only a test without a previous
 installation creates (and deletes) a new plugin entry.
 
-Not restored: what the plugin itself does while it runs (one read-only command per host and collection run, log
+Not restored: what the plugin itself does while it runs (read-only commands per host and collection run, log
 lines). Morpheus keeps uploaded jars in its plugin directory on the manager; after a successful upload only the
 current one remains.
 

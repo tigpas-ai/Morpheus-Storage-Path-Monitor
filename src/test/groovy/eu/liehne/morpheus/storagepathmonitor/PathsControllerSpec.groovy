@@ -31,8 +31,9 @@ class PathsControllerSpec extends Specification {
 	UserDirectory directory = Mock()
 	Snapshot snapshot = new Snapshot(
 		[(7L): [new HostRef(11L, 'host-a'), new HostRef(12L, 'host-b'), new HostRef(13L, 'host-c')]],
-		[(11L): HostMeasurement.success(11L, T1, ['lun1': new MultipathStatus.Device(2, 2), 'lun2': new MultipathStatus.Device(2, 1)]),
-		 (12L): HostMeasurement.success(12L, T2, ['lun1': new MultipathStatus.Device(2, 2)]),
+		[(11L): HostMeasurement.success(11L, T1, ['lun1': new MultipathStatus.Device(2, 2), 'lun2': new MultipathStatus.Device(2, 1)],
+			[new Mount('lun1', '/mnt/1', '1:1', false), new Mount('lun2', '/mnt/2', '1:2', false)]),
+		 (12L): HostMeasurement.success(12L, T2, ['lun1': new MultipathStatus.Device(2, 2)], [new Mount('lun1', '/mnt/1', '1:1', false)]),
 		 (13L): HostMeasurement.failure(13L, T2, 'no answer within 30 s')],
 		T1)
 	PathsController controller = new PathsController(null, Stub(MorpheusContext), directory,
@@ -62,23 +63,102 @@ class PathsControllerSpec extends Specification {
 			intervalSeconds: 60,
 			datastores     : [
 				[id: 21L, name: 'ds-1', state: 'unknown', counts: [ok: 2, unknown: 1, degraded: 0, down: 0], hosts: [
-					[hostId: 11L, name: 'host-a', state: 'ok', activePaths: 2, totalPaths: 2, expectedPaths: 2, measuredAt: '2026-01-01T10:00:00Z', error: null],
-					[hostId: 12L, name: 'host-b', state: 'ok', activePaths: 2, totalPaths: 2, expectedPaths: 2, measuredAt: '2026-01-01T10:00:05Z', error: null],
-					[hostId: 13L, name: 'host-c', state: 'unknown', activePaths: null, totalPaths: null, expectedPaths: null, measuredAt: '2026-01-01T10:00:05Z', error: 'no answer within 30 s']]],
+					[hostId: 11L, name: 'host-a', state: 'ok', activePaths: 2, totalPaths: 2, expectedPaths: 2, mounted: true, withdrawn: false, measuredAt: '2026-01-01T10:00:00Z', error: null],
+					[hostId: 12L, name: 'host-b', state: 'ok', activePaths: 2, totalPaths: 2, expectedPaths: 2, mounted: true, withdrawn: false, measuredAt: '2026-01-01T10:00:05Z', error: null],
+					[hostId: 13L, name: 'host-c', state: 'unknown', activePaths: null, totalPaths: null, expectedPaths: null, mounted: null, withdrawn: null, measuredAt: '2026-01-01T10:00:05Z', error: 'no answer within 30 s']]],
 				[id: 22L, name: 'ds-2', state: 'down', counts: [ok: 0, unknown: 1, degraded: 1, down: 1], hosts: [
-					[hostId: 11L, name: 'host-a', state: 'degraded', activePaths: 1, totalPaths: 2, expectedPaths: 2, measuredAt: '2026-01-01T10:00:00Z', error: null],
-					[hostId: 12L, name: 'host-b', state: 'down', activePaths: 0, totalPaths: 0, expectedPaths: 2, measuredAt: '2026-01-01T10:00:05Z', error: null],
-					[hostId: 13L, name: 'host-c', state: 'unknown', activePaths: null, totalPaths: null, expectedPaths: null, measuredAt: '2026-01-01T10:00:05Z', error: 'no answer within 30 s']]]
-			]
+					[hostId: 11L, name: 'host-a', state: 'degraded', activePaths: 1, totalPaths: 2, expectedPaths: 2, mounted: true, withdrawn: false, measuredAt: '2026-01-01T10:00:00Z', error: null],
+					[hostId: 12L, name: 'host-b', state: 'down', activePaths: 0, totalPaths: 0, expectedPaths: 2, mounted: false, withdrawn: false, measuredAt: '2026-01-01T10:00:05Z', error: null],
+					[hostId: 13L, name: 'host-c', state: 'unknown', activePaths: null, totalPaths: null, expectedPaths: null, mounted: null, withdrawn: null, measuredAt: '2026-01-01T10:00:05Z', error: 'no answer within 30 s']]]
+			],
+			orphanMounts   : []
 		]
+	}
+
+	@Unroll
+	def 'not mounted only counts for a datastore that was finished before the measurements started'() {
+		given:
+		Map<String, MultipathStatus.Device> lun = [lun1: new MultipathStatus.Device(2, 2)]
+		directory.clusterVisible(admin, 7L) >> true
+		directory.datastores(admin, 7L) >> [new SharedDatastore(21L, 'ds-1', 'lun1', provisioned)]
+		snapshot = new Snapshot([(7L): [new HostRef(11L, 'a')]], [(11L): HostMeasurement.success(11L, T1, lun, [])], T1, [:], settled)
+
+		when:
+		Map host = (controller.paths(model(admin, [clusterId: '7'])).data as Map).datastores[0].hosts[0] as Map
+
+		then:
+		host.mounted == false
+		host.state == expected
+
+		where:
+		provisioned | settled               || expected
+		true        | [(7L): ['lun1'] as Set] || 'down'
+		true        | [(7L): [] as Set]     || 'ok'
+		true        | [:]                   || 'ok'
+		false       | [(7L): ['lun1'] as Set] || 'ok'
+		true        | null                  || 'down'
+	}
+
+	def 'mount state: mounted #mounted, withdrawn #withdrawn, expected to be mounted #expectMounted is #expected'() {
+		expect:
+		PathReport.mountState(mounted, withdrawn, expectMounted) == expected
+
+		where:
+		mounted | withdrawn | expectMounted || expected
+		true    | false     | true        || PathState.OK
+		true    | true      | true        || PathState.DOWN
+		true    | null      | true        || PathState.UNKNOWN
+		false   | false     | true        || PathState.DOWN
+		false   | false     | false       || PathState.OK
+		null    | null      | true        || PathState.UNKNOWN
+	}
+
+	def 'paths fine: not mounted and withdrawn are down, a failed check is unknown with its error'() {
+		given:
+		Map<String, MultipathStatus.Device> lun = [lun1: new MultipathStatus.Device(2, 2)]
+		snapshot = new Snapshot([(7L): [new HostRef(11L, 'a'), new HostRef(12L, 'b'), new HostRef(13L, 'c'), new HostRef(14L, 'd')]],
+			[(11L): HostMeasurement.success(11L, T1, lun, []),
+			 (12L): HostMeasurement.success(12L, T1, lun, [new Mount('lun1', '/mnt/1', '1:1', true)]),
+			 (13L): HostMeasurement.success(13L, T1, lun, null, 'mount check failed: no answer within 30 s'),
+			 (14L): HostMeasurement.success(14L, T1, lun, [new Mount('lun1', '/mnt/1', '1:1', null)], 'withdraw check failed: command failed on the host')], T1)
+		directory.clusterVisible(admin, 7L) >> true
+		directory.datastores(admin, 7L) >> [new SharedDatastore(21L, 'ds-1', 'lun1')]
+
+		when:
+		Map ds = (controller.paths(model(admin, [clusterId: '7'])).data as Map).datastores[0] as Map
+
+		then:
+		ds.state == 'down'
+		ds.hosts*.state == ['down', 'down', 'unknown', 'unknown']
+		ds.hosts*.mounted == [false, true, null, true]
+		ds.hosts*.withdrawn == [false, true, null, null]
+		ds.hosts*.activePaths == [2, 2, 2, 2]
+		ds.hosts*.error == [null, null, 'mount check failed: no answer within 30 s', 'withdraw check failed: command failed on the host']
+	}
+
+	def 'orphan mounts raise the cluster to degraded; details only for users who may see hosts'() {
+		given:
+		snapshot = new Snapshot([(7L): [new HostRef(11L, 'host-a')]], [:], T1,
+			[(7L): [new OrphanMount(11L, 'lost', '/mnt/lost', false, T1)]])
+		directory.clusterVisible(_, 7L) >> true
+		directory.datastores(_, 7L) >> []
+
+		expect:
+		controller.paths(model(admin, [clusterId: '7'])).data == [clusterId: 7L, state: 'degraded',
+			lastRunAt: '2026-01-01T10:00:00Z', intervalSeconds: 60, datastores: [],
+			orphanMounts: [[hostId: 11L, name: 'host-a', device: 'lost', mountPoint: '/mnt/lost', withdrawn: false, since: '2026-01-01T10:00:00Z']]]
+		controller.paths(model(storageOnly, [clusterId: '7'])).data.orphanMounts ==
+			[[hostId: 11L, name: null, device: null, mountPoint: null, withdrawn: false, since: '2026-01-01T10:00:00Z']]
+		controller.paths(model(admin, [clusterId: '7', hosts: 'false'])).data.orphanMounts.size() == 1
 	}
 
 	def 'a host with fewer paths than its peers is degraded even if all its paths are active'() {
 		given:
+		List<Mount> mounted = [new Mount('lun1', '/mnt/1', '1:1', false)]
 		snapshot = new Snapshot([(7L): [new HostRef(11L, 'a'), new HostRef(12L, 'b'), new HostRef(13L, 'c')]],
-			[(11L): HostMeasurement.success(11L, T1, [lun1: new MultipathStatus.Device(2, 2)]),
-			 (12L): HostMeasurement.success(12L, T1, [lun1: new MultipathStatus.Device(1, 1)]),
-			 (13L): HostMeasurement.success(13L, T1, [lun1: new MultipathStatus.Device(2, 2)])], T1)
+			[(11L): HostMeasurement.success(11L, T1, [lun1: new MultipathStatus.Device(2, 2)], mounted),
+			 (12L): HostMeasurement.success(12L, T1, [lun1: new MultipathStatus.Device(1, 1)], mounted),
+			 (13L): HostMeasurement.success(13L, T1, [lun1: new MultipathStatus.Device(2, 2)], mounted)], T1)
 		directory.clusterVisible(admin, 7L) >> true
 		directory.datastores(admin, 7L) >> [new SharedDatastore(21L, 'ds-1', 'lun1')]
 
@@ -164,7 +244,7 @@ class PathsControllerSpec extends Specification {
 
 		expect:
 		controller.paths(model(admin, [clusterId: '7'])).data == [clusterId: 7L, state: null,
-			lastRunAt: '2026-01-01T10:00:00Z', intervalSeconds: 60, datastores: []]
+			lastRunAt: '2026-01-01T10:00:00Z', intervalSeconds: 60, datastores: [], orphanMounts: []]
 	}
 
 	@Unroll

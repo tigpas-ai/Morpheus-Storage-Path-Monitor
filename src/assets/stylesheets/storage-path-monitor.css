@@ -58,6 +58,16 @@
 	margin: 0;
 }
 
+#spm-root .spm-orphans {
+	margin: 8px 0 16px;
+	padding: 8px 12px;
+	border-left: 4px solid #b26a00;
+}
+
+#spm-root .spm-orphans table {
+	margin: 0;
+}
+
 #spm-root .spm-error {
 	color: #c62828;
 }

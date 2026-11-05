@@ -32,6 +32,8 @@
 		var summary = root.querySelector('.spm-summary');
 		var updated = root.querySelector('.spm-updated');
 		var interval = root.querySelector('.spm-interval');
+		var orphanBox = root.querySelector('.spm-orphans');
+		var orphanBody = orphanBox.querySelector('tbody');
 		var scrolled = false;
 		var loading = false;
 		var sequence = 0;
@@ -87,11 +89,42 @@
 			return text;
 		}
 
+		function mountText(host) {
+			if (host.mounted === null || host.mounted === undefined) {
+				return '–';
+			}
+			if (!host.mounted) {
+				return 'not mounted';
+			}
+			return host.withdrawn ? 'withdrawn' : 'mounted';
+		}
+
+		function withdrawnText(value) {
+			if (value === null || value === undefined) {
+				return '–';
+			}
+			return value ? 'yes' : 'no';
+		}
+
+		function renderOrphans(orphans) {
+			orphanBody.textContent = '';
+			orphanBox.hidden = !orphans.length;
+			orphans.forEach(function (orphan) {
+				var row = el('tr');
+				row.appendChild(el('td', null, orphan.name || ('Host ' + orphan.hostId)));
+				row.appendChild(el('td', null, orphan.device || '–'));
+				row.appendChild(el('td', null, orphan.mountPoint || '–'));
+				row.appendChild(el('td', null, withdrawnText(orphan.withdrawn)));
+				row.appendChild(el('td', null, formatTime(orphan.since)));
+				orphanBody.appendChild(row);
+			});
+		}
+
 		function hostTable(datastore) {
 			var inner = el('table', 'table table-condensed spm-hosts');
 			var head = el('thead');
 			var headRow = el('tr');
-			['Host', 'State', 'Paths', 'Measured', 'Error'].forEach(function (label) {
+			['Host', 'State', 'Paths', 'Mount', 'Measured', 'Error'].forEach(function (label) {
 				headRow.appendChild(el('th', null, label));
 			});
 			head.appendChild(headRow);
@@ -117,6 +150,7 @@
 				stateCell.appendChild(badge(host.state));
 				row.appendChild(stateCell);
 				row.appendChild(el('td', null, pathsText(host)));
+				row.appendChild(el('td', null, mountText(host)));
 				row.appendChild(el('td', null, formatTime(host.measuredAt)));
 				row.appendChild(el('td', 'spm-error', host.error || ''));
 				body.appendChild(row);
@@ -124,7 +158,7 @@
 			if (!(datastore.hosts || []).length) {
 				var empty = el('tr');
 				var cell = el('td', 'spm-empty', 'No host measured yet.');
-				cell.colSpan = 5;
+				cell.colSpan = 6;
 				empty.appendChild(cell);
 				body.appendChild(empty);
 			}
@@ -141,6 +175,7 @@
 			if (data.state) {
 				summary.appendChild(badge(data.state));
 			}
+			renderOrphans(data.orphanMounts || []);
 			if (!datastores.length) {
 				table.hidden = true;
 				message.hidden = false;

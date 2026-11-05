@@ -19,10 +19,13 @@ import java.util.function.Supplier
 /**
  * Background collection on the manager, independent of any request.
  *
- * Each run reads the settings, determines the monitored clusters and their hosts, and runs the fixed status command
- * once per host (one call covers all LUNs of the host), with at most {@code parallelHosts} hosts at the same time.
+ * Each run reads the settings, determines the monitored clusters and their hosts, and runs the fixed commands once per
+ * host (one call covers all LUNs of the host), with at most {@code parallelHosts} hosts at the same time.
  * Each host result is published as soon as it is available. The next run starts {@code intervalSeconds} after the
  * previous one ended, so runs never overlap. Requests only read the published {@link Snapshot}.
+ *
+ * At the end of a run, the mounts are compared with the datastores Morpheus knows at that moment. A mount only counts as
+ * orphaned once two runs in a row found it without a datastore, so a datastore being created never shows up as one.
  */
 @Slf4j
 class PathCollector {
@@ -32,6 +35,11 @@ class PathCollector {
 	static final long HOST_GRACE_SECONDS = 30
 	/** Wait for interrupted workers at the end of a run */
 	static final long WORKER_GRACE_SECONDS = 5
+	/** Commands a host may need in one run: paths, mounts, withdraw state */
+	static final int COMMANDS_PER_HOST = 3
+
+	/** Mounts without a datastore in the last run → first run that saw them; only used by the (single) run thread */
+	private Map<OrphanKey, Instant> orphanCandidates = [:]
 
 	private final ClusterInventory inventory
 	private final HostCommandRunner runner
@@ -122,8 +130,9 @@ class PathCollector {
 		List<Long> hostIds = clusters.values().collectMany { it*.id }.unique()
 		// Publish the current host list first: hosts that left are dropped, new hosts show up as not measured yet
 		snapshot.updateAndGet { Snapshot old ->
-			new Snapshot(clusters, old.measurements.findAll { it.key in hostIds }, old.lastRunAt)
+			new Snapshot(clusters, old.measurements.findAll { it.key in hostIds }, old.lastRunAt, old.orphansByCluster, old.settledByCluster)
 		}
+		Map<Long, Set<String>> settled = readSettled(clusters.keySet())
 		if (hostIds) {
 			ExecutorService pool = Executors.newFixedThreadPool(Math.min(s.parallelHosts, hostIds.size()),
 				threads('storage-path-monitor-worker'))
@@ -136,7 +145,7 @@ class PathCollector {
 					[(id): pool.submit({ record(measure(id, s), run) } as Runnable)]
 				}
 				long deadline = System.nanoTime() +
-					TimeUnit.SECONDS.toNanos(s.commandTimeoutSeconds + hostGraceSeconds) *
+					TimeUnit.SECONDS.toNanos(s.commandTimeoutSeconds * COMMANDS_PER_HOST + hostGraceSeconds) *
 					((hostIds.size() + s.parallelHosts - 1).intdiv(s.parallelHosts) as long)
 				futures.each { Long id, Future<?> future ->
 					try {
@@ -160,13 +169,105 @@ class PathCollector {
 				}
 			}
 		}
-		snapshot.updateAndGet { Snapshot old -> new Snapshot(old.hostsByCluster, old.measurements, start) }
+		Map<Long, List<OrphanMount>> orphans = findOrphans(clusters, start)
+		snapshot.updateAndGet { Snapshot old ->
+			new Snapshot(old.hostsByCluster, old.measurements, start, orphans, settled ?: old.settledByCluster)
+		}
+	}
+
+	/** Finished datastores before measuring; {@code null} if Morpheus cannot be asked (the last answer stays valid) */
+	private Map<Long, Set<String>> readSettled(Collection<Long> clusterIds) {
+		try {
+			return inventory.settledDevices(clusterIds)
+		} catch (Exception e) {
+			log.warn("Storage Path Monitor: could not read the datastores before measuring: ${e.message}")
+			return null
+		}
+	}
+
+	/**
+	 * Compares the mounts with the datastores Morpheus knows now. Hosts without a current mount list keep what was known
+	 * about them. If Morpheus cannot be asked, nothing changes: an empty answer must not turn every mount into an orphan.
+	 */
+	private Map<Long, List<OrphanMount>> findOrphans(Map<Long, List<HostRef>> clusters, Instant start) {
+		Snapshot current = snapshot.get()
+		Map<Long, KnownStorage> known
+		try {
+			known = inventory.knownStorage(clusters.keySet())
+		} catch (Exception e) {
+			log.warn("Storage Path Monitor: could not read the datastores to compare mounts: ${e.message}")
+			return current.orphansByCluster
+		}
+		Map<OrphanKey, Instant> candidates = [:]
+		Map<Long, List<OrphanMount>> orphans = [:]
+		clusters.each { Long clusterId, List<HostRef> hosts ->
+			KnownStorage storage = known?.get(clusterId)
+			List<OrphanMount> found = []
+			hosts.each { HostRef host ->
+				List<Mount> mounts = current.measurements.get(host.id)?.mounts
+				if (mounts == null || storage == null) {
+					// nothing to compare in this run: keep its candidates and confirmed orphans
+					orphanCandidates.findAll { it.key.hostId == host.id }.each { candidates.put(it.key, it.value) }
+					found.addAll(current.orphansByCluster.get(clusterId)?.findAll { it.hostId == host.id } ?: [])
+					return
+				}
+				mounts.findAll { !storage.knows(it) }.each { Mount mount ->
+					OrphanKey key = new OrphanKey(host.id, mount.device, mount.mountPoint)
+					Instant since = orphanCandidates.get(key)
+					candidates.put(key, since ?: start)
+					if (since != null) {
+						found << new OrphanMount(host.id, mount.device, mount.mountPoint, mount.withdrawn, since)
+					}
+				}
+			}
+			if (found) {
+				orphans.put(clusterId, found.sort { it.hostId }.asImmutable())
+			}
+		}
+		logOrphanChanges(current.orphansByCluster, orphans)
+		orphanCandidates = candidates
+		return orphans
+	}
+
+	private static void logOrphanChanges(Map<Long, List<OrphanMount>> before, Map<Long, List<OrphanMount>> now) {
+		Closure<Set<OrphanKey>> keys = { Map<Long, List<OrphanMount>> byCluster ->
+			byCluster.values().collectMany { list -> list.collect { new OrphanKey(it.hostId, it.device, it.mountPoint) } } as Set
+		}
+		Set<OrphanKey> old = keys(before)
+		Set<OrphanKey> current = keys(now)
+		(current - old).each {
+			log.warn("Storage Path Monitor: host ${it.hostId}: mount ${it.mountPoint} of ${it.device} has no datastore in Morpheus")
+		}
+		(old - current).each {
+			log.warn("Storage Path Monitor: host ${it.hostId}: mount ${it.mountPoint} of ${it.device} is no longer orphaned")
+		}
 	}
 
 	private HostMeasurement measure(Long hostId, MonitorSettings s) {
 		try {
-			String output = runner.run(hostId, s.commandTimeoutSeconds)
-			return HostMeasurement.success(hostId, clock.instant(), MultipathStatus.parse(output).asImmutable())
+			Map<String, MultipathStatus.Device> devices =
+				MultipathStatus.parse(runner.run(hostId, MultipathStatus.COMMAND, s.commandTimeoutSeconds)).asImmutable()
+			List<Mount> mounts
+			try {
+				mounts = HostMounts.parseMounts(runner.run(hostId, HostMounts.MOUNT_COMMAND, s.commandTimeoutSeconds))
+			} catch (HostCommandException | MultipathStatus.ParseException e) {
+				return HostMeasurement.success(hostId, clock.instant(), devices, null, "mount check failed: ${e.message}".toString())
+			}
+			if (!mounts) {
+				return HostMeasurement.success(hostId, clock.instant(), devices, [])
+			}
+			String withdrawError = null
+			Map<String, Boolean> withdrawn = [:]
+			try {
+				withdrawn = HostMounts.parseWithdrawn(runner.run(hostId, HostMounts.WITHDRAW_COMMAND, s.commandTimeoutSeconds))
+			} catch (HostCommandException | MultipathStatus.ParseException e) {
+				withdrawError = "withdraw check failed: ${e.message}".toString()
+			}
+			List<Mount> checked = HostMounts.withWithdrawn(mounts, withdrawn).asImmutable()
+			if (withdrawError == null && checked.any { it.withdrawn == null }) {
+				withdrawError = 'withdraw check failed: mount not covered by the command output'
+			}
+			return HostMeasurement.success(hostId, clock.instant(), devices, checked, withdrawError)
 		} catch (HostCommandException | MultipathStatus.ParseException e) {
 			return HostMeasurement.failure(hostId, clock.instant(), e.message)
 		} catch (Exception e) {
@@ -191,7 +292,7 @@ class PathCollector {
 			previous = old.measurements.get(m.hostId)
 			Map<Long, HostMeasurement> measurements = new HashMap<>(old.measurements)
 			measurements.put(m.hostId, m)
-			new Snapshot(old.hostsByCluster, measurements, old.lastRunAt)
+			new Snapshot(old.hostsByCluster, measurements, old.lastRunAt, old.orphansByCluster, old.settledByCluster)
 		}
 		if (stored) {
 			changes(previous, m).each { log.warn("Storage Path Monitor: ${it}") }
@@ -199,8 +300,9 @@ class PathCollector {
 	}
 
 	/**
-	 * Log lines for state changes between two measurements of a host: measurement failing or working again, and
-	 * multipath devices whose state changed. On the first measurement only devices that are not ok are reported.
+	 * Log lines for state changes between two measurements of a host: measurement failing or working again, multipath
+	 * devices whose state changed, and mounts that came, went or were withdrawn. On the first measurement only devices
+	 * that are not ok and withdrawn mounts are reported.
 	 */
 	static List<String> changes(HostMeasurement previous, HostMeasurement current) {
 		String host = "host ${current.hostId}"
@@ -231,6 +333,28 @@ class PathCollector {
 					lines << "${host} device ${name}: ${was.code} -> ${state.code} (${paths})".toString()
 				}
 			}
+		}
+		lines.addAll(mountChanges(host, previous?.success ? previous.mounts : null, current.mounts))
+		return lines
+	}
+
+	private static List<String> mountChanges(String host, List<Mount> before, List<Mount> now) {
+		if (now == null) {
+			return []
+		}
+		List<String> lines = []
+		Map<String, Mount> old = (before ?: []).collectEntries { [(it.mountPoint): it] }
+		now.each { Mount mount ->
+			Mount was = old.remove(mount.mountPoint)
+			if (before != null && was == null) {
+				lines << "${host}: ${mount.device} mounted on ${mount.mountPoint}".toString()
+			}
+			if (mount.withdrawn == Boolean.TRUE && was?.withdrawn != Boolean.TRUE) {
+				lines << "${host}: file system on ${mount.mountPoint} (${mount.device}) withdrawn".toString()
+			}
+		}
+		old.values().each { Mount mount ->
+			lines << "${host}: ${mount.device} no longer mounted on ${mount.mountPoint}".toString()
 		}
 		return lines
 	}

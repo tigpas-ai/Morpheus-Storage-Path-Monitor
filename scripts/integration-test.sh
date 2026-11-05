@@ -411,7 +411,8 @@ CONTRACT_JQ='
   and ($r.intervalSeconds | type) == "number"
   and ($r.lastRunAt | type) == "string"
   and ([$r.datastores[].name] == ([$r.datastores[].name] | sort))
-  and ($r.state == ([$r.datastores[].state] | worst))
+  and ($r.state == (([$r.datastores[].state] + (if ($r.orphanMounts | length) > 0 then ["degraded"] else [] end)) | worst))
+  and all($r.orphanMounts[]; (.hostId as $h | $hostids | index($h)) != null and (.since | type) == "string")
   and all($r.datastores[];
         (.id as $d | $dsids | index($d)) != null
         and (.counts | keys == ["degraded", "down", "ok", "unknown"])
@@ -421,8 +422,11 @@ CONTRACT_JQ='
         and (.state == ([.hosts[].state] | worst))
         and all(.hosts[]; (.state | sev) >= 0 and (.state | IN("ok", "degraded", "down", "unknown"))
               and ((.name | type) == "string")
-              and (if .state == "unknown" then .activePaths == null else
-                    (.activePaths | type) == "number" and .activePaths <= .totalPaths and .totalPaths <= .expectedPaths end)))'
+              and (if .activePaths == null then .state == "unknown" else
+                    (.activePaths | type) == "number" and .activePaths <= .totalPaths and .totalPaths <= .expectedPaths end)
+              and (.mounted | type | IN("boolean", "null")) and (.withdrawn | type | IN("boolean", "null"))
+              and (if .mounted == null or .withdrawn == null then .state != "ok" else true end)
+              and (if .withdrawn == true then .state == "down" else true end)))'
 
 for cid in $CLUSTERS; do
   api GET "/api/clusters/$cid" >/dev/null
@@ -508,7 +512,8 @@ if [[ -n $CLUSTERS ]]; then
   check "role changed: Compute none" relogin admin-servers=none
   route "clusterId=$cid" >/dev/null
   check "without Compute read: host names hidden" \
-    jq -e '(.datastores | length) > 0 and all(.datastores[].hosts[]; .name == null and (.hostId | type) == "number")' "$TMP/page"
+    jq -e '(.datastores | length) > 0 and all(.datastores[].hosts[]; .name == null and (.hostId | type) == "number")
+           and all(.orphanMounts[]; .name == null and .device == null and .mountPoint == null)' "$TMP/page"
   # without Storage (set to none): the plugin answers 403, the cluster page has no view
   check "role changed: Storage none" relogin infrastructure-storage=none
   r=$(route "clusterId=$cid")

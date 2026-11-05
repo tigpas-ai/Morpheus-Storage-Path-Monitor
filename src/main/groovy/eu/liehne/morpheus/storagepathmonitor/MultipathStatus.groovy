@@ -13,7 +13,7 @@ import groovy.transform.Immutable
 @CompileStatic
 class MultipathStatus {
 
-	/** The only command the plugin runs on hosts */
+	/** The command for the path states; the other commands the plugin runs on hosts are in {@link HostMounts} */
 	static final String COMMAND = 'hvmcli storage multipath status --json'
 
 	/** Upper bound for the command output; a few hundred bytes per device are expected */

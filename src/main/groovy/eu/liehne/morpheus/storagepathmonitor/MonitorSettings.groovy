@@ -42,7 +42,7 @@ class MonitorSettings {
 			number(PARALLEL, 'Hosts in parallel', 1, DEFAULT_PARALLEL,
 				"Number of hosts queried at the same time, 1–${MAX_PARALLEL}"),
 			number(TIMEOUT, 'Command timeout (seconds)', 2, DEFAULT_TIMEOUT,
-				"Upper bound for the command on one host, ${MIN_TIMEOUT}–${MAX_TIMEOUT} seconds")
+				"Upper bound for each command on one host,${MIN_TIMEOUT}–${MAX_TIMEOUT} seconds")
 		]
 	}
 

@@ -34,7 +34,8 @@ apply unchanged. It loads when it is opened and reloads every 30 s while it is v
 
 ## `GET /plugin/storage-path-monitor/paths`
 
-Path states of the shared-LUN datastores of one HVM cluster, per datastore and host.
+Path and mount states of the shared-LUN datastores of one HVM cluster, per datastore and host, plus the GFS2 mounts on
+its hosts that have no datastore.
 
 - **Authentication:** Morpheus UI session (cookie). API bearer tokens are not accepted for plugin routes; Morpheus
   answers them with a redirect (`302`) to the login page.
@@ -46,7 +47,7 @@ Path states of the shared-LUN datastores of one HVM cluster, per datastore and h
 | Name | Required | Values | Meaning |
 |---|---|---|---|
 | `clusterId` | yes | cluster id (number) | HVM cluster (`/api/clusters/:id`) |
-| `hosts` | no | `true` (default), `false` | `false` leaves out the per-host list and only returns the counters per datastore |
+| `hosts` | no | `true` (default), `false` | `false` leaves out the per-host list and only returns the counters per datastore; `orphanMounts` stays complete |
 
 ### Permissions
 - Role permission **Infrastructure: Storage** (`infrastructure-storage`) at least `read` **and** **Infrastructure:
@@ -57,6 +58,9 @@ Path states of the shared-LUN datastores of one HVM cluster, per datastore and h
 - Host names are only returned with **Infrastructure: Compute** (`admin-servers`) at least `read`; otherwise `name`
   is `null` and only the host id is given. Host ids and their states are returned to every user who may see the
   cluster and the datastore (the state of a datastore is a property of the datastore on each host).
+- A mount without a datastore belongs to no datastore, so it is returned to every user who may see the cluster. Its
+  device and mount point are details of the host: same permission as host names, otherwise `null`. Its host id, its
+  `withdrawn` and `since`, and the cluster `state` it raises remain visible.
 - The route is registered with the permission `infrastructure-storage`. Without a session Morpheus answers `302`
   (redirect to the login page). If the user's role has no entry at all for `infrastructure-storage` (never set),
   Morpheus refuses the route itself with `404` and its HTML error page; with the permission set to `none` the plugin
@@ -83,10 +87,22 @@ Path states of the shared-LUN datastores of one HVM cluster, per datastore and h
           "activePaths": 2,
           "totalPaths": 2,
           "expectedPaths": 2,
+          "mounted": true,
+          "withdrawn": false,
           "measuredAt": "2026-10-31T15:19:23.236Z",
           "error": null
         }
       ]
+    }
+  ],
+  "orphanMounts": [
+    {
+      "hostId": 2,
+      "name": "host-2",
+      "device": "36e8…",
+      "mountPoint": "/mnt/b9b0…",
+      "withdrawn": false,
+      "since": "2026-10-31T15:10:02.114Z"
     }
   ]
 }
@@ -95,7 +111,7 @@ Path states of the shared-LUN datastores of one HVM cluster, per datastore and h
 | Field | Type | Meaning |
 |---|---|---|
 | `clusterId` | number | as requested |
-| `state` | string \| null | worst `state` of all listed datastores; `null` if the cluster has no shared-LUN datastore |
+| `state` | string \| null | worst `state` of all listed datastores, at least `degraded` if `orphanMounts` is not empty (since 0.4.0); `null` if the cluster has neither a shared-LUN datastore nor such a mount |
 | `lastRunAt` | string \| null | start of the last completed collection run (ISO-8601, UTC, milliseconds); `null` before the first run (about 30 s after the plugin was loaded) |
 | `intervalSeconds` | number | configured pause between two runs; results are normally at most `intervalSeconds` + run time old |
 | `datastores[]` | array | shared-LUN datastores of the cluster, sorted by name; datastores whose block device is not a multipath device (`/dev/mapper/<name>`) are not listed |
@@ -106,20 +122,33 @@ Path states of the shared-LUN datastores of one HVM cluster, per datastore and h
 | `hosts[].hostId` | number | Morpheus server id of the host |
 | `hosts[].name` | string \| null | host name, `null` without Compute permission |
 | `hosts[].state` | string | state of the LUN on this host, see below |
-| `hosts[].activePaths`, `.totalPaths` | number \| null | active and known paths of the LUN on this host; `0`/`0` if the host does not see the LUN; `null` if the state is `unknown` |
-| `hosts[].expectedPaths` | number \| null | highest `totalPaths` of this LUN on any measured host of the cluster (since 0.2.0); `null` if the state is `unknown` |
+| `hosts[].activePaths`, `.totalPaths` | number \| null | active and known paths of the LUN on this host; `0`/`0` if the host does not see the LUN; `null` if the paths could not be measured (since 0.4.0 the state can also be `unknown` with paths present: only the mount check failed) |
+| `hosts[].expectedPaths` | number \| null | highest `totalPaths` of this LUN on any measured host of the cluster (since 0.2.0); `null` if the paths could not be measured |
+| `hosts[].mounted` | boolean \| null | the file system of the datastore is mounted on this host (since 0.4.0); `null` if that could not be checked |
+| `hosts[].withdrawn` | boolean \| null | GFS2 withdrew the mounted file system after an I/O error, it cannot be used (since 0.4.0); `false` if not mounted; `null` if that could not be checked |
 | `hosts[].measuredAt` | string \| null | time the host was last queried (ISO-8601, UTC); `null` if not queried yet |
-| `hosts[].error` | string \| null | why the measurement failed (short English text, no command output); `null` on success |
+| `hosts[].error` | string \| null | why a measurement or check failed (short English text, no command output); `null` on success |
+| `orphanMounts[]` | array | GFS2 mounts on hosts of the cluster for which Morpheus has no datastore (since 0.4.0), also with `hosts=false`; empty if there are none. For example, unmounting failed while the datastore was removed. A mount is listed once two collection runs in a row found it without a datastore, so a datastore being created does not appear here |
+| `orphanMounts[].hostId` | number | Morpheus server id of the host |
+| `orphanMounts[].name` | string \| null | host name, `null` without Compute permission |
+| `orphanMounts[].device` | string \| null | multipath map name, or the device path if it is not a multipath device; `null` without Compute permission |
+| `orphanMounts[].mountPoint` | string \| null | mount point on the host; `null` without Compute permission |
+| `orphanMounts[].withdrawn` | boolean \| null | as `hosts[].withdrawn` |
+| `orphanMounts[].since` | string | start of the first collection run that found it (ISO-8601, UTC); starts again when the plugin is restarted |
 
 ### States
 | `state` | Meaning |
 |---|---|
-| `ok` | all paths of the LUN active, and the host has as many paths as `expectedPaths` |
-| `degraded` | some, but not all paths active – or all active, but fewer than `expectedPaths` (a path was removed on this host, e.g. iSCSI session logged out: multipath then forgets it and counts 1/1) |
-| `down` | no path active, or the host does not see the LUN at all |
-| `unknown` | not measured yet, or the last measurement of the host failed (see `error`) |
+| `ok` | all paths of the LUN active, the host has as many paths as `expectedPaths`, and the file system is mounted and not withdrawn |
+| `degraded` | some, but not all paths active – or all active, but fewer than `expectedPaths` (a path was removed on this host, e.g. iSCSI session logged out: multipath then forgets it and counts 1/1). On cluster level also: a mount without a datastore |
+| `down` | no path active, or the host does not see the LUN at all, or (since 0.4.0) the file system is not mounted or withdrawn on this host |
+| `unknown` | not measured yet, or the last measurement or mount check of the host failed (see `error`) |
 
 Severity for combining hosts and datastores: `down` > `degraded` > `unknown` > `ok`.
+
+While Morpheus is creating or removing a datastore, and until one complete collection run has seen it finished, a
+missing mount does not lower the state; `mounted` is still `false`. After that it does, also during the minutes in which
+Morpheus still mounts a new datastore on the remaining hosts (Morpheus itself shows the status `warning` then).
 
 The comparison with `expectedPaths` assumes that all hosts of a cluster are connected to the storage alike. If one
 host has fewer paths by design, it is permanently reported as `degraded`. A host that is switched off or cannot be
@@ -128,7 +157,8 @@ reached is `unknown` (not `down`): its paths cannot be measured.
 Possible `error` texts (consumers should display, not parse them): `no answer within <n> s`,
 `command failed with exit code <n>`, `command failed on the host`, `command could not be run on the host`,
 `host not found`, `empty command output`, `command output is not valid JSON`, `command output too large`,
-`unexpected command output`, `command reported error code <n>`, `measurement failed`.
+`unexpected command output`, `command reported error code <n>`, `measurement failed`; for a failed mount check (the
+paths stay valid) one of these after `mount check failed: ` or `withdraw check failed: `.
 
 ### Errors
 From the plugin always JSON `{"error": "<text>"}` with UTF-8 (the `302` and the HTML `404` come from Morpheus).
@@ -146,4 +176,5 @@ From the plugin always JSON `{"error": "<text>"}` with UTF-8 (the `302` and the 
 ## Stability
 - Fields are only added, never renamed or removed, within the same major version. Consumers must ignore unknown
   fields and unknown `state` values (treat them like `unknown`).
-- No raw command output is ever returned.
+- No raw command output is ever returned; the only values taken from it are the counters and, for a mount without a
+  datastore, its device and mount point.
