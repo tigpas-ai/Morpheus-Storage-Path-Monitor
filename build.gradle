@@ -69,7 +69,7 @@ jar {
                 'Morpheus-Name': 'Storage Path Monitor',
                 'Morpheus-Organization': 'morpheus',
                 'Morpheus-Code': 'storage-path-monitor',
-                'Morpheus-Description': 'Monitors the multipath storage paths of shared-LUN datastores on HVM hosts',
+                'Morpheus-Description': 'Monitors the multipath storage paths and mounts of shared-LUN datastores on HVM hosts',
                 'Morpheus-Logo': 'assets/morpheus.svg',
                 'Morpheus-Logo-Dark': 'assets/morpheus.svg',
                 'Morpheus-Labels': 'Plugin',
