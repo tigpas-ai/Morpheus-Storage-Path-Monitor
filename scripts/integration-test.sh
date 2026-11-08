@@ -153,7 +153,10 @@ ui_login() {
     "$BASE/login/process") || return 1
   [[ -n $target && $target != *"/login"* ]]
 }
-ui_logout() { [[ -f $COOKIES ]] && "${CURL[@]}" -b "$COOKIES" -o /dev/null "$BASE/logout" || true; rm -f "$COOKIES"; }
+ui_logout() {
+  if [[ -f $COOKIES ]]; then "${CURL[@]}" -b "$COOKIES" -o /dev/null "$BASE/logout" || true; fi
+  rm -f "$COOKIES"
+}
 # ui_get <path> [cookies] – body → $TMP/page, prints "<status> <content type>"
 ui_get() {
   "${CURL[@]}" -b "${2:-$COOKIES}" -o "$TMP/page" -w '%{http_code} %{content_type}' "$BASE$1" || echo "000 -"
