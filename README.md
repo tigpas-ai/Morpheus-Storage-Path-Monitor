@@ -5,7 +5,7 @@ plugin, one job: it collects these states in the background, shows them on the c
 small read-only interface for other plugins and tools.
 
 > Tested with **HPE Morpheus 9.1.0** (plugin API 1.4.1), HVM clusters with iSCSI shared-LUN datastores.
-> Source: <https://github.com/tigpas-ai/morpheus-storage-path-monitor>
+> Source: <https://github.com/tigpas-ai/Morpheus-Storage-Path-Monitor>
 
 ## Contents
 | Path | What |
@@ -19,7 +19,7 @@ small read-only interface for other plugins and tools.
 
 ## Quick start
 **Download**: the plugin jar (`storage-path-monitor-<version>-all.jar`) and its SHA-256 file are attached to each
-[GitHub release](https://github.com/tigpas-ai/morpheus-storage-path-monitor/releases). Pushing a tag `v<version>`
+[GitHub release](https://github.com/tigpas-ai/Morpheus-Storage-Path-Monitor/releases). Pushing a tag `v<version>`
 builds and publishes them (see `.github/workflows/release.yml`). Verify with `sha256sum -c <jar>.sha256`.
 
 Or build it yourself (JDK 17; the code is compiled for Java 11, the Gradle wrapper runs on Java up to 20):

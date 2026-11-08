@@ -16,7 +16,7 @@ class StoragePathMonitorPlugin extends Plugin {
 	static final String CODE = 'storage-path-monitor'
 	static final String AUTHOR = 'Pascal Liehne'
 	static final String LICENSE_NAME = 'MIT'
-	static final String REPOSITORY_URL = 'https://github.com/tigpas-ai/morpheus-storage-path-monitor'
+	static final String REPOSITORY_URL = 'https://github.com/tigpas-ai/Morpheus-Storage-Path-Monitor'
 
 	private PathCollector collector
 

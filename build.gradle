@@ -77,7 +77,7 @@ jar {
                 'Implementation-Title': 'morpheus-storage-path-monitor',
                 'Implementation-Version': version,
                 'Implementation-Vendor': 'Pascal Liehne',
-                'Implementation-URL': 'https://github.com/tigpas-ai/morpheus-storage-path-monitor'
+                'Implementation-URL': 'https://github.com/tigpas-ai/Morpheus-Storage-Path-Monitor'
         )
     }
 }

@@ -1,6 +1,12 @@
 # Changelog
 
+All notable changes to this plugin. The interface is described in [`CONTRACT.md`](CONTRACT.md).
+
+## Unreleased
+
 ## 0.5.0 – 2026-11-05
+- Release workflow: pushing a tag `v<version>` builds the jar and publishes it with a SHA-256 file as a GitHub release.
+- Source URL is `https://github.com/tigpas-ai/Morpheus-Storage-Path-Monitor`.
 - Storage pool check per datastore and host: new field `hosts[].poolActive`. A libvirt pool that is inactive or missing
   makes the host `down`, even with the file system mounted; a failed check makes it `unknown`. One more fixed read-only
   command per host (`hvmcli storage list --json`).
