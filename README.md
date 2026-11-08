@@ -18,7 +18,11 @@ small read-only interface for other plugins and tools.
 | [CHANGELOG.md](CHANGELOG.md), [SECURITY.md](SECURITY.md) | changes per version, reporting security issues |
 
 ## Quick start
-Build (JDK 17; the code is compiled for Java 11, the Gradle wrapper runs on Java up to 20):
+**Download**: the plugin jar (`storage-path-monitor-<version>-all.jar`) and its SHA-256 file are attached to each
+[GitHub release](https://github.com/tigpas-ai/morpheus-storage-path-monitor/releases). Pushing a tag `v<version>`
+builds and publishes them (see `.github/workflows/release.yml`). Verify with `sha256sum -c <jar>.sha256`.
+
+Or build it yourself (JDK 17; the code is compiled for Java 11, the Gradle wrapper runs on Java up to 20):
 
 ```bash
 ./gradlew test shadowJar     # → build/libs/storage-path-monitor-<version>-all.jar
