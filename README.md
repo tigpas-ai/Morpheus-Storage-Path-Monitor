@@ -54,6 +54,13 @@ hosts. To pause it instead, disable the plugin on the same page.
 - State changes (e.g. a LUN going from `ok` to `degraded` on a host, a mount disappearing) are written to the Morpheus
   log as warnings.
 
+## Screenshots
+The **Multipath Status** view on an HVM cluster. Names and addresses are replaced by placeholders.
+
+| Data stores with their state | Expanded to the hosts |
+|---|---|
+| ![Multipath Status: one row per data store](docs/images/multipath-status.png) | ![Multipath Status: hosts with paths, mount and time of measurement](docs/images/multipath-status-expanded.png) |
+
 ## Settings
 *Administration → Integrations → Plugins → Storage Path Monitor*
 
